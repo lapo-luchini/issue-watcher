@@ -112,22 +112,26 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
   return result;
 }
 
-/** Runs `fn` over `items` with at most `limit` in flight; the first thrown error stops new work and is rethrown. */
+/**
+ * Runs `fn` over `items` with at most `limit` in flight. The first thrown error stops new
+ * work and is rethrown, but only once the calls already in flight have finished, so none
+ * of them writes after the caller has moved on (recorded the run, rolled back a dry run…).
+ */
 async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
-  let stopped = false;
+  const errors: unknown[] = [];
   const worker = async () => {
-    while (!stopped && next < items.length) {
+    while (errors.length === 0 && next < items.length) {
       const item = items[next++] as T;
       try {
         await fn(item);
       } catch (err) {
-        stopped = true;
-        throw err;
+        errors.push(err);
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (errors.length > 0) throw errors[0];
 }
 
 /** Synthesizes events the forge does not report as such: CI result changes and new merge conflicts. */

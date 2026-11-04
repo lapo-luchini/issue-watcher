@@ -199,6 +199,27 @@ test("pollAll: rate limit stops the instance without advancing the cursor; disab
   expect(d).toMatchObject({ ok: false, error: "missing GITHUB_TOKEN in .env" });
 });
 
+test("pollAll: a rate limit waits for in-flight fetches, so a dry run still persists nothing", async () => {
+  const urls = [1, 2, 3, 4].map((n) => `https://github.com/foo/bar/pull/${n}`);
+  adapter.discovered = urls.map((url) => ({ url, instance: "github", kind: "pr" }));
+  const release: (() => void)[] = [];
+  adapter.fetch = async (ref: ItemRef) => {
+    if (ref.url === urls[0]) throw new RateLimitError(403, "x", null);
+    await new Promise<void>((resolve) => release.push(resolve)); // resolves only when the test says so
+    return snapshot(ref.url, [comment("c:1", minutes(1), "maintainer", "Hello")]);
+  };
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+  const run = pollAll(ctx, { dryRun: true });
+  await tick();
+  expect(release).toHaveLength(3);
+  for (const r of release) r();
+  const [res] = await run;
+  await tick();
+  expect(res).toMatchObject({ ok: false, error: "rate limited on x" });
+  for (const url of urls) expect(store.getItem(url)).toBeNull();
+  expect(store.eventsFor(urls[1] as string, true)).toEqual([]);
+});
+
 test("pollAll: dry run writes nothing; lock prevents overlap", async () => {
   adapter.discovered = [{ url: PR, instance: "github", kind: "pr" }];
   adapter.snapshots.set(PR, snapshot(PR, []));
