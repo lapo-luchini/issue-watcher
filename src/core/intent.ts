@@ -126,12 +126,18 @@ export function editIntent(text: string, url: string, change: IntentChange, cano
   return doc.toString();
 }
 
-/** Returns `text` with a manual item (listed, never polled) appended. */
-export function addManual(text: string, url: string, title?: string): string {
+/**
+ * Returns `text` with a new entry appended: a manual item (listed, never polled, with an
+ * optional title), or a forge item to track (just its canonical URL, fetched on the next poll).
+ */
+export function addEntry(text: string, url: string, opts: { manual: boolean; title?: string }): string {
   const doc = parseDocument(text);
   const items = itemsOf(doc);
   if (items.items.some((n) => urlOf(n) === url)) throw new Error(`${url} is already listed in items.yaml`);
-  items.add(doc.createNode(title ? { url, manual: true, title } : { url, manual: true }));
+  const entry: Record<string, unknown> = { url };
+  if (opts.manual) entry.manual = true;
+  if (opts.manual && opts.title) entry.title = opts.title;
+  items.add(doc.createNode(entry));
   return doc.toString();
 }
 

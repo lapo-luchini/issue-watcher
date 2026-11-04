@@ -224,6 +224,16 @@ export class Store {
     return r?.cursor ?? null;
   }
 
+  /** Per instance that ever ran: when its latest run finished, its error, and when it last succeeded. */
+  lastRuns(): { instance: string; finishedAt: string; error: string | null; lastSuccessAt: string | null }[] {
+    return this.db.query(`
+      SELECT r.instance, r.finished_at AS finishedAt, r.error,
+        (SELECT MAX(s.finished_at) FROM poll_runs s WHERE s.instance = r.instance AND s.error IS NULL) AS lastSuccessAt
+      FROM poll_runs r WHERE r.id IN (SELECT MAX(id) FROM poll_runs GROUP BY instance)`).all() as {
+      instance: string; finishedAt: string; error: string | null; lastSuccessAt: string | null;
+    }[];
+  }
+
   recordRun(r: PollRun): void {
     this.db.query(`INSERT INTO poll_runs (instance, started_at, finished_at, cursor, error)
       VALUES ($instance, $startedAt, $finishedAt, $cursor, $error)`).run({ ...r });

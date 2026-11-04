@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addManual, commitFile, editIntent, parseIntent } from "../src/core/intent.ts";
+import { addEntry, commitFile, editIntent, parseIntent } from "../src/core/intent.ts";
 
 const text = `# My overrides: keep this comment.
 items:
@@ -61,12 +61,14 @@ test("editIntent works on an empty or missing file", () => {
   }
 });
 
-test("addManual adds a manual item with its title, and refuses duplicates", () => {
-  const out = addManual(text, "https://lists.example.org/msg2.html", "[PATCH v2] foo");
+test("addEntry adds a manual item with its title, or a forge item to track, and refuses duplicates", () => {
+  const out = addEntry(text, "https://lists.example.org/msg2.html", { manual: true, title: "[PATCH v2] foo" });
   expect(parseIntent(out).get("https://lists.example.org/msg2.html")).toMatchObject({ manual: true, title: "[PATCH v2] foo" });
-  expect(() => addManual(out, "https://lists.example.org/msg2.html", "again")).toThrow("already listed");
-  const untitled = addManual("", "https://lists.example.org/msg3.html");
+  expect(() => addEntry(out, "https://lists.example.org/msg2.html", { manual: true })).toThrow("already listed");
+  const untitled = addEntry("", "https://lists.example.org/msg3.html", { manual: true });
   expect(parseIntent(untitled).get("https://lists.example.org/msg3.html")).toMatchObject({ manual: true, title: undefined });
+  const tracked = addEntry("", "https://github.com/x/y/issues/7", { manual: false, title: "ignored" });
+  expect(tracked).toBe("items:\n  - url: https://github.com/x/y/issues/7\n");
 });
 
 /** A throwaway git repository with an identity, holding data/items.yaml. */
