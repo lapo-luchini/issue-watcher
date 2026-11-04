@@ -94,25 +94,35 @@ test("issues skip PR-only calls", async () => {
   expect(calls).toHaveLength(2);
 });
 
-test("discover: first run searches open items only", async () => {
-  const q = encodeURIComponent("involves:lapo is:open");
+/** The search path discover() requests for one involvement qualifier. */
+const search = (who: string, when: string) =>
+  `/search/issues?q=${encodeURIComponent(`${who}:lapo ${when}`)}&sort=updated&per_page=100`;
+
+test("discover: first run searches open items only, including review requests and reviews", async () => {
   const { adapter, calls } = fakeGitHub({
-    [`/search/issues?q=${q}&sort=updated&per_page=100`]: { items: [{ html_url: PR }, { html_url: "https://github.com/x/y/issues/1" }] },
+    [search("involves", "is:open")]: { items: [{ html_url: PR }, { html_url: "https://github.com/x/y/issues/1" }] },
+    [search("review-requested", "is:open")]: { items: [{ html_url: "https://github.com/r/q/pull/5" }] },
+    [search("reviewed-by", "is:open")]: { items: [{ html_url: PR }, { html_url: "https://github.com/r/v/pull/6" }] },
   });
   const refs = await adapter.discover(null);
-  expect(refs.map((r) => r.url)).toEqual([PR, "https://github.com/x/y/issues/1"]);
-  expect(calls).toHaveLength(1);
+  expect(refs.map((r) => r.url)).toEqual([
+    PR, "https://github.com/x/y/issues/1", "https://github.com/r/q/pull/5", "https://github.com/r/v/pull/6",
+  ]);
+  expect(calls).toHaveLength(3);
 });
 
 test("discover: incremental run adds subscribed items from notifications", async () => {
   const since = new Date("2026-11-04T10:00:00.000Z");
-  const q = encodeURIComponent("involves:lapo updated:>=2026-11-04T10:00:00Z");
+  const when = "updated:>=2026-11-04T10:00:00Z";
   const { adapter } = fakeGitHub({
-    [`/search/issues?q=${q}&sort=updated&per_page=100`]: { items: [{ html_url: PR }] },
+    [search("involves", when)]: { items: [{ html_url: PR }] },
+    [search("review-requested", when)]: { items: [{ html_url: PR }] },
+    [search("reviewed-by", when)]: { items: [] },
     [`/notifications?all=true&per_page=50&since=${encodeURIComponent(since.toISOString())}`]: [
       { subject: { url: "https://api.github.com/repos/k/l/issues/9" } },
       { subject: { url: "https://api.github.com/repos/k/l/pulls/10" } },
       { subject: { url: "https://api.github.com/repos/k/l/releases/1" } },
+      { subject: { url: "https://api.github.com/repos/foo/bar/pulls/42" } },
     ],
   });
   const refs = await adapter.discover(since);
@@ -121,9 +131,11 @@ test("discover: incremental run adds subscribed items from notifications", async
 
 test("discover: notifications forbidden (fine-grained token) is skipped", async () => {
   const since = new Date("2026-11-04T10:00:00.000Z");
-  const q = encodeURIComponent("involves:lapo updated:>=2026-11-04T10:00:00Z");
+  const when = "updated:>=2026-11-04T10:00:00Z";
   const { adapter } = fakeGitHub({
-    [`/search/issues?q=${q}&sort=updated&per_page=100`]: { items: [] },
+    [search("involves", when)]: { items: [] },
+    [search("review-requested", when)]: { items: [] },
+    [search("reviewed-by", when)]: { items: [] },
     [`/notifications?all=true&per_page=50&since=${encodeURIComponent(since.toISOString())}`]: 403,
   });
   expect(await adapter.discover(since)).toEqual([]);

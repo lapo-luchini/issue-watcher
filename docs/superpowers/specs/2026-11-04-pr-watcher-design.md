@@ -130,7 +130,8 @@ Per instance, one "involving me, updated since cursor" query, then full fetch on
 returned items:
 
 - **GitHub**: `search/issues?q=involves:USER updated:>T` (covers authored, assigned,
-  mentioned, commented). Plus, on every incremental poll, `/notifications?all=true&since=T`
+  mentioned, commented), plus the same query with `review-requested:USER` and
+  `reviewed-by:USER` (which `involves:` does not cover), deduplicated by URL. Plus, on every incremental poll, `/notifications?all=true&since=T`
   (one cheap call), used only for discovery of issues I merely subscribed to; skipped when
   the token cannot read notifications (fine-grained tokens).
 - **GitLab**: `/issues` and `/merge_requests` with `scope=all`, author / assignee /
@@ -298,7 +299,7 @@ proxy with authentication, which is documented in the README.
   exponential backoff.
 - **GitHub**: on a rate-limit response (403 with `X-RateLimit-Remaining: 0` or
   `Retry-After`, or 429), stop the instance cleanly without advancing the cursor and report
-  the reset time. Search (30/min) is used once per run. No ETag conditional requests:
+  the reset time. Search (30/min) is used three times per run. No ETag conditional requests:
   discovery only returns changed items, so a `304` would almost never happen.
 - Other forges: at most 4 concurrent requests per instance, same backoff policy.
 

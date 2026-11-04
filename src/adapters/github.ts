@@ -75,11 +75,20 @@ export class GitHubAdapter implements Adapter {
     // First run: everything open that involves me. Later runs: anything updated since the cursor,
     // including closed/merged items, so state changes are seen.
     const when = since ? `updated:>=${since.toISOString().replace(/\.\d{3}Z$/, "Z")}` : "is:open";
-    const q = encodeURIComponent(`involves:${this.inst.user} ${when}`);
-    const found = await this.all<{ html_url: string }>(`/search/issues?q=${q}&sort=updated&per_page=100`, (b) => b.items);
-    const refs = found.map((i) => this.refFromUrl(i.html_url)).filter((r): r is ItemRef => r !== null);
-    if (since) refs.push(...(await this.subscribed(since)));
-    return refs;
+    // `involves:` does not cover review requests or reviews, so those get their own searches.
+    const refs = new Map<string, ItemRef>();
+    for (const who of ["involves", "review-requested", "reviewed-by"]) {
+      const q = encodeURIComponent(`${who}:${this.inst.user} ${when}`);
+      const found = await this.all<{ html_url: string }>(`/search/issues?q=${q}&sort=updated&per_page=100`, (b) => b.items);
+      for (const i of found) {
+        const ref = this.refFromUrl(i.html_url);
+        if (ref && !refs.has(ref.url)) refs.set(ref.url, ref);
+      }
+    }
+    if (since) {
+      for (const ref of await this.subscribed(since)) if (!refs.has(ref.url)) refs.set(ref.url, ref);
+    }
+    return [...refs.values()];
   }
 
   /** Issues I merely subscribed to are not matched by `involves:`; notifications cover them. */
