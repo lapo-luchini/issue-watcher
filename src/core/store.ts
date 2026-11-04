@@ -146,6 +146,13 @@ export class Store {
     return this.db.query("SELECT * FROM items").all().map(toItem);
   }
 
+  /** Refs of an instance's items that may still change: open ones, and any fetched since `fetchedSince`. */
+  listKnown(instance: string, fetchedSince: string): ItemRef[] {
+    return this.db.query(`SELECT url, instance, kind FROM items
+      WHERE instance = $instance AND state != 'gone' AND (state = 'open' OR fetched_at >= $fetchedSince)
+      ORDER BY url`).all({ instance, fetchedSince }) as ItemRef[];
+  }
+
   upsertItem(i: ItemRow): void {
     this.db.query(`
       INSERT INTO items (url, id, instance, kind, repo, title, state, state_detail, ci_state,

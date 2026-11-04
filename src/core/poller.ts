@@ -10,6 +10,8 @@ import { summarize } from "./summary.ts";
 /** Each run re-queries this much before the cursor, to tolerate clock skew; event keys dedup the overlap. */
 export const CURSOR_OVERLAP_MS = 5 * 60_000;
 const FETCH_CONCURRENCY = 4;
+/** Closed items stay "known" to discovery for this long after their last fetch (late comments). */
+const KNOWN_RECENT_MS = 30 * 24 * 60 * 60_000;
 /**
  * An item whose fetch fails this many runs in a row is dropped from the retry table.
  * Its first_since goes with it, so if a never-stored item is rediscovered later, activity
@@ -65,7 +67,8 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
     const adapter = ctx.adapterFor(inst);
     const since = cursor ? new Date(new Date(cursor).getTime() - CURSOR_OVERLAP_MS) : null;
     const refs = new Map<string, ItemRef>();
-    for (const r of await adapter.discover(since)) refs.set(r.url, r);
+    const known = ctx.store.listKnown(inst.id, new Date(startedAt.getTime() - KNOWN_RECENT_MS).toISOString());
+    for (const r of await adapter.discover(since, known)) refs.set(r.url, r);
     // Items listed in items.yaml that the cache has never seen (e.g. added by hand).
     for (const entry of ctx.intent.values()) {
       if (entry.manual || ctx.store.getItem(entry.url)) continue;

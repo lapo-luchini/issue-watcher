@@ -45,8 +45,12 @@ export interface Snapshot {
 export interface Adapter {
   /** Parse a web URL belonging to this instance, or return null if it is not ours. */
   refFromUrl(url: string): ItemRef | null;
-  /** Items involving me that changed since `since` (null: first run, open items only). */
-  discover(since: Date | null): Promise<ItemRef[]>;
+  /**
+   * Items involving me that changed since `since` (null: first run, open items only).
+   * `known` lists this instance's items already in the cache (open, or fetched recently):
+   * forges whose search cannot find items I only commented on check these for updates.
+   */
+  discover(since: Date | null, known: ItemRef[]): Promise<ItemRef[]>;
   /** Full current view of one item. Throws GoneError if it no longer exists. */
   fetch(ref: ItemRef): Promise<Snapshot>;
 }

@@ -30,11 +30,13 @@ class FakeAdapter implements Adapter {
   discovered: ItemRef[] = [];
   snapshots = new Map<string, Snapshot | Error>();
   sinceSeen: (Date | null)[] = [];
+  knownSeen: ItemRef[][] = [];
   refFromUrl(url: string): ItemRef | null {
     return url.startsWith("https://github.com/") ? { url, instance: "github", kind: url.includes("/pull/") ? "pr" : "issue" } : null;
   }
-  async discover(since: Date | null) {
+  async discover(since: Date | null, known: ItemRef[]) {
     this.sinceSeen.push(since);
+    this.knownSeen.push(known);
     return this.discovered;
   }
   async fetch(ref: ItemRef) {
@@ -143,9 +145,12 @@ test("pollAll: discovery, intent-only items, cursor and overlap", async () => {
   expect(store.getItem(ISSUE)).not.toBeNull();
   expect(store.getItem("https://lists.example.org/x")).toBeNull();
   expect(adapter.sinceSeen).toEqual([null]);
+  expect(adapter.knownSeen).toEqual([[]]);
   clock = minutes(30);
   await pollAll(ctx);
   expect(adapter.sinceSeen[1]?.getTime()).toBe(T0.getTime() - CURSOR_OVERLAP_MS);
+  // Discovery is told which items are already tracked, so it can check them for updates.
+  expect(adapter.knownSeen[1]?.map((r) => r.url)).toEqual([ISSUE, PR]);
 });
 
 test("pollAll: a failed item is retried later without holding back the cursor; gone items get one signal", async () => {
