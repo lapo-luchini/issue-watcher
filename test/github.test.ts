@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { GitHubAdapter } from "../src/adapters/github.ts";
 import type { InstanceConfig } from "../src/core/config.ts";
-import { GoneError, HttpError, type HttpDeps } from "../src/core/http.ts";
+import { GoneError, HttpError, RateLimitError, type HttpDeps } from "../src/core/http.ts";
 
 const API = "https://api.github.com";
 const inst = { id: "github", type: "github" as const, url: API, user: "lapo", emails: [] as string[], token: "t" };
@@ -139,13 +139,45 @@ test("only a 404 on the item itself means gone; a 404 on a sub-request is a plai
   const gone = await fakeGitHub({}).adapter.fetch(ref).catch((e) => e);
   expect(gone).toBeInstanceOf(GoneError);
   for (const path of ["/repos/foo/bar/issues/42/timeline?per_page=100", "/repos/foo/bar/pulls/42",
-    "/repos/foo/bar/pulls/42/commits?per_page=100", "/repos/foo/bar/commits/abc123/status"]) {
+    "/repos/foo/bar/pulls/42/commits?per_page=100"]) { // (CI sources are best-effort: see below)
     const routes: Record<string, unknown> = { ...prRoutes, [path]: 404 };
     const err = await fakeGitHub(routes).adapter.fetch(ref).catch((e) => e);
     expect(err).toBeInstanceOf(HttpError);
     expect(err).not.toBeInstanceOf(GoneError);
     expect(err.status).toBe(404);
   }
+});
+
+test("CI is best-effort: unreadable check runs and statuses give no CI state", async () => {
+  const { adapter } = fakeGitHub({
+    ...prRoutes,
+    "/repos/foo/bar/commits/abc123/check-runs?per_page=100": 403, // e.g. token without checks permission
+    "/repos/foo/bar/commits/abc123/status": 404,
+  });
+  const snap = await adapter.fetch({ url: PR, instance: "github", kind: "pr" });
+  expect(snap.ciState).toBeNull();
+  expect(snap.events.map((e) => e.key)).toContain("c:1");
+});
+
+test("CI uses whichever source is readable", async () => {
+  const { adapter } = fakeGitHub({ ...prRoutes, "/repos/foo/bar/commits/abc123/check-runs?per_page=100": 403 });
+  expect((await adapter.fetch({ url: PR, instance: "github", kind: "pr" })).ciState).toBe("success");
+});
+
+test("a rate limit on CI still stops the fetch", async () => {
+  const http: HttpDeps = {
+    fetchFn: async (url) => {
+      const path = url.slice(API.length);
+      if (path.includes("/check-runs")) return new Response("", { status: 403, headers: { "x-ratelimit-remaining": "0" } });
+      const body = (prRoutes as Record<string, unknown>)[path];
+      return body === undefined ? new Response("", { status: 404 }) : Response.json(body);
+    },
+    sleep: async () => {},
+    retries: 0,
+    timeoutMs: 1000,
+  };
+  const adapter = new GitHubAdapter({ ...inst }, http);
+  expect(await adapter.fetch({ url: PR, instance: "github", kind: "pr" }).catch((e) => e)).toBeInstanceOf(RateLimitError);
 });
 
 test("issues skip PR-only calls", async () => {

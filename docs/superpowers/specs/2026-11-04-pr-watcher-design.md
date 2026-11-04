@@ -313,7 +313,10 @@ proxy with authentication, which is documented in the README.
   of each following run (dedup keeps this harmless); a success removes the row, and after
   5 failed attempts the item is dropped from it (logged). The run is still reported as
   failed when items failed. Only a 404/410 on the item itself marks it gone; on a
-  sub-request (timeline, commits, CI) it is an ordinary failure.
+  sub-request (timeline, PR, commits) it is an ordinary failure. CI is best-effort: a
+  check-runs or status request the token cannot read (403/404, not a rate limit) counts
+  as no CI data from that source, and with neither readable the CI state is unknown
+  (the previous settled value is kept).
 - Missing token in `.env` → instance disabled with a clear status message.
 - HTTP: 30 s timeout; retry transient failures (5xx, network) up to 3 times with
   exponential backoff.

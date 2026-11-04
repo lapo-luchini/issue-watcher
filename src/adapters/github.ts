@@ -233,14 +233,27 @@ export class GitHubAdapter implements Adapter {
     };
   }
 
-  /** Combines check runs (GitHub Actions etc.) and legacy commit statuses into one state. */
+  /**
+   * Combines check runs (GitHub Actions etc.) and legacy commit statuses into one state.
+   * Best-effort: a source the token cannot read (403/404) counts as absent; null if neither is readable.
+   */
   private async ciState(base: string, sha: string): Promise<CiState | null> {
-    const runs = await this.get<{ check_runs: { status: string; conclusion: string | null }[] }>(`${base}/commits/${sha}/check-runs?per_page=100`);
-    const status = await this.get<{ state: string; total_count: number }>(`${base}/commits/${sha}/status`);
-    const states: CiState[] = runs.check_runs.map((r) =>
+    const runs = await this.optional(this.get<{ check_runs: { status: string; conclusion: string | null }[] }>(`${base}/commits/${sha}/check-runs?per_page=100`));
+    const status = await this.optional(this.get<{ state: string; total_count: number }>(`${base}/commits/${sha}/status`));
+    const states: CiState[] = (runs?.check_runs ?? []).map((r) =>
       r.status !== "completed" ? "pending" : FAILED_CONCLUSIONS.has(r.conclusion ?? "") ? "failure" : "success");
-    if (status.total_count > 0) states.push(status.state === "success" ? "success" : status.state === "pending" ? "pending" : "failure");
+    if (status && status.total_count > 0) states.push(status.state === "success" ? "success" : status.state === "pending" ? "pending" : "failure");
     if (states.length === 0) return null;
     return states.includes("failure") ? "failure" : states.includes("pending") ? "pending" : "success";
+  }
+
+  /** null when the request is forbidden or not found; rate limits and other errors still throw. */
+  private async optional<T>(request: Promise<T>): Promise<T | null> {
+    try {
+      return await request;
+    } catch (err) {
+      if (err instanceof HttpError && !(err instanceof RateLimitError) && (err.status === 403 || err.status === 404)) return null;
+      throw err;
+    }
   }
 }
