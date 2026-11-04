@@ -76,6 +76,9 @@ The server has no authentication: it listens on 127.0.0.1 only, and refuses requ
 not come from its own page. To reach it from elsewhere, put it behind a reverse proxy that
 authenticates, and tell the server the public name the proxy forwards
 (`WATCHER_ALLOWED_HOSTS=watcher.example.org`, comma-separated); never expose it directly.
+Requests naming any other host are refused, whatever address the server listens on, so a
+hostile web page cannot reach it through a DNS name of its own. `WATCHER_DEV=1` turns on
+Bun's development mode (live reload of the page) for working on the UI.
 
 ## Polling periodically
 

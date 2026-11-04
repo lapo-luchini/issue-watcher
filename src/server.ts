@@ -17,7 +17,8 @@ export interface ServerOptions {
   home: string; // the watcher's directory: data/config.yaml, data/items.yaml, var/cache.sqlite
   port?: number; // 0: any free port
   hostname?: string; // default 127.0.0.1
-  allowedHosts?: string[]; // extra Host names accepted on loopback, e.g. the name a reverse proxy forwards
+  allowedHosts?: string[]; // extra Host names accepted (a port is ignored), e.g. the name a reverse proxy forwards
+  development?: boolean; // Bun's development mode, for working on the UI
   adapterFor?: (inst: InstanceConfig) => Adapter; // tests replace the real forges
   now?: () => Date;
 }
@@ -40,6 +41,11 @@ class HttpError extends Error {
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 
+/** "Example.org:8411" → "example.org"; "[::1]:8411" → "[::1]". */
+function withoutPort(host: string): string {
+  return host.replace(/:\d+$/, "").toLowerCase();
+}
+
 export async function startServer(opts: ServerOptions) {
   const now = opts.now ?? (() => new Date());
   const config = await loadConfig(join(opts.home, "data/config.yaml"));
@@ -48,7 +54,7 @@ export async function startServer(opts: ServerOptions) {
   mkdirSync(join(opts.home, "var"), { recursive: true });
   const store = new Store(join(opts.home, "var/cache.sqlite"));
   const hostname = opts.hostname ?? "127.0.0.1";
-  const allowedHosts = new Set((opts.allowedHosts ?? []).map((h) => h.trim().toLowerCase()).filter((h) => h));
+  const allowedHosts = new Set((opts.allowedHosts ?? []).map((h) => withoutPort(h.trim())).filter((h) => h));
   let polling: Promise<void> | null = null;
   let lastPoll: PollReport | null = null;
 
@@ -58,19 +64,18 @@ export async function startServer(opts: ServerOptions) {
   }
 
   /**
-   * Guards every request. Bound to loopback, the Host header must be a loopback name: a page on
-   * another site could otherwise point its own DNS name at 127.0.0.1 and read the API (DNS
-   * rebinding). Changes must be JSON and, when the browser says where they come from, from this
-   * page's origin: a plain cross-site form post cannot do either (CSRF).
+   * Guards every request. The Host header must be a loopback name or an allowed one: a page on
+   * another site could otherwise point its own DNS name at this server and read the API (DNS
+   * rebinding), whatever address the server is bound to. Changes must be JSON and, when the
+   * browser says where they come from, from this page's origin: a plain cross-site form post
+   * cannot do either (CSRF).
    */
   function guard(req: Request): void {
     const url = new URL(req.url);
     const host = req.headers.get("host") ?? url.host;
-    if (LOOPBACK.has(hostname) || hostname === "::1") {
-      const name = host.replace(/:\d+$/, "").toLowerCase();
-      if (!LOOPBACK.has(name) && !allowedHosts.has(name)) {
-        throw new HttpError(403, `unexpected Host '${host}' (behind a proxy? add it to WATCHER_ALLOWED_HOSTS)`);
-      }
+    const name = withoutPort(host);
+    if (!LOOPBACK.has(name) && !allowedHosts.has(name)) {
+      throw new HttpError(403, `unexpected Host '${host}' (reached by another name? add it to WATCHER_ALLOWED_HOSTS)`);
     }
     if (req.method === "GET" || req.method === "HEAD") return;
     if (!(req.headers.get("content-type") ?? "").startsWith("application/json")) {
@@ -149,7 +154,8 @@ export async function startServer(opts: ServerOptions) {
   const server = Bun.serve({
     port: opts.port ?? 8411,
     hostname,
-    development: process.env.NODE_ENV !== "production",
+    // Bun's development mode (hot reload, detailed error pages) only when asked for.
+    development: opts.development ?? false,
     routes: {
       "/": index,
       "/api/items": {

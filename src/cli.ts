@@ -53,9 +53,16 @@ async function main(argv: string[]): Promise<number> {
     const srv = await startServer({
       home, port, hostname: values.host ?? process.env.WATCHER_HOST ?? "127.0.0.1",
       allowedHosts: (process.env.WATCHER_ALLOWED_HOSTS ?? "").split(","),
+      development: process.env.WATCHER_DEV === "1",
     });
     console.log(`watcher: serving ${srv.url} (Ctrl-C to stop)`);
-    await new Promise(() => {}); // until killed
+    // On Ctrl-C or kill, let a running poll finish and close the cache before exiting.
+    await new Promise<void>((resolve) => {
+      for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => resolve());
+    });
+    console.log("watcher: stopping (waiting for a running poll, if any)");
+    await srv.stop();
+    return 0;
   }
   const config = await loadConfig(join(home, "data/config.yaml"));
   const { intent, unknown } = canonicalIntentFor(config, await loadIntent(join(home, "data/items.yaml")));

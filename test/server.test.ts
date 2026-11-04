@@ -166,6 +166,16 @@ test("behind a reverse proxy: an allowed public Host, with a https origin, is ac
   expect((await api("/api/items", { headers: { host: "evil.example" } })).status).toBe(403);
 });
 
+test("bound to all interfaces, the Host check still applies; allowed names may carry a port", async () => {
+  await srv.stop();
+  srv = await startServer({ home, port: 0, hostname: "0.0.0.0", adapterFor: () => adapter, allowedHosts: ["192.168.1.5:8411", ""] });
+  const base = srv.url.replace("0.0.0.0", "127.0.0.1");
+  const get = (host: string) => fetch(new URL("/api/items", base), { headers: { host } });
+  expect((await get("evil.example:8411")).status).toBe(403); // DNS rebinding, even off loopback
+  expect((await get("192.168.1.5:8411")).status).toBe(200);
+  expect((await get("localhost")).status).toBe(200);
+});
+
 test("GET / serves the web UI", async () => {
   const res = await api("/");
   expect(res.status).toBe(200);
