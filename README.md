@@ -16,15 +16,26 @@ bun run watcher poll --dry-run                 # check instances and tokens; sav
 bun run watcher poll                           # first real run: records history as baseline
 ```
 
-### GitHub token
+### Tokens
 
-The watcher only reads. Use a **classic** personal access token with just the
-`notifications` scope: public repositories, search and CI status need no scope at all.
-(Don't pick `public_repo` or `repo`: those grant write access. `repo` is only needed to
-watch private repositories.)
+The watcher only reads, so give every token read-only access.
 
-Fine-grained tokens with "Public repositories (read-only)" access work too, but they cannot
-read notifications, so issues you only *subscribed to* are not discovered.
+- **GitHub**: a **classic** personal access token with just the `notifications` scope:
+  public repositories, search and CI status need no scope at all. (Don't pick `public_repo`
+  or `repo`: those grant write access. `repo` is only needed to watch private repositories.)
+  Fine-grained tokens with "Public repositories (read-only)" access work too, but they cannot
+  read notifications, so issues you only *subscribed to* are not discovered.
+- **GitLab** (gitlab.com, invent.kde.org, …): a personal access token with the `read_api`
+  scope (User settings → Access tokens). Required: GitLab's searches, to-dos and comments are
+  not readable anonymously.
+- **Forgejo** (codeberg.org, …): an access token (Settings → Applications) with read access
+  to *issue*, *notification* and *repository*. Required: without a token, searches return
+  everyone's items. Without the notification permission, items you only commented on are not
+  discovered; without the repository permission, maintainers are not recognized.
+- **Bugzilla** (bugs.freebsd.org, bugs.kde.org, bugzilla.mozilla.org): an API key
+  (Preferences → API Keys). Optional: public bugs and searches work anonymously; a key is
+  needed for bugs only logged-in users can see. `user` is your login email; list your other
+  addresses in `emails` so your comments under them are recognized as yours.
 
 ## Commands
 

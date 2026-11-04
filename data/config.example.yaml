@@ -1,10 +1,11 @@
 # Optional: your commit emails, so your own pushes are recognized even when an email is
 # not linked to your forge account (compared case-insensitively). Applies to every
 # instance; an instance with its own `emails:` list uses that list instead.
+# Bugzilla instances also use them to recognize your own comments and changes.
 emails: [you@example.org]
 
 # Instances to poll. Tokens live in .env; token_env names the variable.
-# Only the github type is implemented so far; gitlab, forgejo and bugzilla come next.
+# `url` is the API base for GitHub, GitLab and Forgejo, and the web base for Bugzilla.
 instances:
   - id: github
     type: github
@@ -12,6 +13,39 @@ instances:
     user: your-github-login
     token_env: GITHUB_TOKEN
     # emails: [you@work.example]   # replaces the top-level list for this instance
+
+  - id: kde
+    type: gitlab
+    url: https://invent.kde.org/api/v4
+    user: your-kde-login
+    token_env: KDE_GITLAB_TOKEN
+
+  - id: codeberg
+    type: forgejo
+    url: https://codeberg.org/api/v1
+    user: your-codeberg-login
+    token_env: CODEBERG_TOKEN
+
+  - id: freebsd-bz
+    type: bugzilla
+    url: https://bugs.freebsd.org/bugzilla
+    user: you@example.org          # your Bugzilla login email
+    token_env: FREEBSD_BZ_KEY      # Bugzilla works anonymously too: drop this line to poll without a key
+    # Email domains of the project's committers: their short comments ("Committed, thanks!")
+    # count as a maintainer's. The bug's assignee always counts.
+    maintainer_domains: [freebsd.org]
+
+  # - id: kde-bz
+  #   type: bugzilla
+  #   url: https://bugs.kde.org
+  #   user: you@example.org
+  #   maintainer_domains: [kde.org]
+
+  # - id: mozilla-bz
+  #   type: bugzilla
+  #   url: https://bugzilla.mozilla.org
+  #   user: you@example.org
+  #   maintainer_domains: [mozilla.com]
 
 # Optional filter tuning (these are the defaults).
 filter:

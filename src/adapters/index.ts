@@ -1,21 +1,29 @@
 import type { Config, InstanceConfig } from "../core/config.ts";
 import { canonicalizeIntent, type Intent } from "../core/intent.ts";
 import type { Adapter, ItemRef } from "../core/model.ts";
+import { BugzillaAdapter } from "./bugzilla.ts";
+import { ForgejoAdapter } from "./forgejo.ts";
 import { GitHubAdapter } from "./github.ts";
+import { GitLabAdapter } from "./gitlab.ts";
 
 export function createAdapter(inst: InstanceConfig): Adapter {
   switch (inst.type) {
     case "github":
       return new GitHubAdapter(inst);
-    default:
-      throw new Error(`no adapter for type '${inst.type}' yet`);
+    case "gitlab":
+      return new GitLabAdapter(inst);
+    case "forgejo":
+      return new ForgejoAdapter(inst);
+    case "bugzilla":
+      return new BugzillaAdapter(inst);
   }
 }
 
 /**
  * Returns a function that maps any item URL (also one copied from the browser) to its
  * canonical ref, using the adapters of the configured instances; null if none recognizes it.
- * Instances whose type has no adapter yet are skipped.
+ * An instance whose adapter cannot be created (e.g. its `url` is not a URL) is skipped here;
+ * polling it reports the error.
  */
 export function urlRecognizer(config: Config): (url: string) => ItemRef | null {
   const adapters: Adapter[] = [];
@@ -23,7 +31,7 @@ export function urlRecognizer(config: Config): (url: string) => ItemRef | null {
     try {
       adapters.push(createAdapter(inst));
     } catch {
-      // No adapter for this instance type yet: its URLs cannot be recognized.
+      // Misconfigured instance: its URLs cannot be recognized.
     }
   }
   return (url) => {
