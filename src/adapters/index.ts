@@ -5,6 +5,7 @@ import { BugzillaAdapter } from "./bugzilla.ts";
 import { ForgejoAdapter } from "./forgejo.ts";
 import { GitHubAdapter } from "./github.ts";
 import { GitLabAdapter } from "./gitlab.ts";
+import { RadicleAdapter } from "./radicle.ts";
 
 export function createAdapter(inst: InstanceConfig): Adapter {
   switch (inst.type) {
@@ -16,6 +17,8 @@ export function createAdapter(inst: InstanceConfig): Adapter {
       return new ForgejoAdapter(inst);
     case "bugzilla":
       return new BugzillaAdapter(inst);
+    case "radicle":
+      return new RadicleAdapter(inst);
   }
 }
 

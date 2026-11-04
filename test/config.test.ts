@@ -60,6 +60,37 @@ instances:
   expect(parseConfig("instances:\n  - {id: a, type: github, url: x, user: u}", {}).instances[0]?.emails).toEqual([]);
 });
 
+test("radicle: user may be a list of identities; repos and web are validated", () => {
+  const cfg = parseConfig(`
+instances:
+  - id: seed
+    type: radicle
+    url: https://seed.radicle.garden/api/v1/
+    user: [did:key:z6MkLaptop, did:key:z6MkDesktop]
+    repos: [rad:z3gqcJUoA1n9HaHKufZs5FCSGazv5]
+    web: https://app.radicle.xyz/nodes/seed.radicle.garden/
+  - id: mine
+    type: radicle
+    url: http://localhost:8080/api/v1
+    user: did:key:z6MkLaptop
+`, {});
+  expect(cfg.instances[0]).toEqual({
+    id: "seed", type: "radicle", url: "https://seed.radicle.garden/api/v1", user: "did:key:z6MkLaptop", emails: [],
+    users: ["did:key:z6MkLaptop", "did:key:z6MkDesktop"], repos: ["rad:z3gqcJUoA1n9HaHKufZs5FCSGazv5"],
+    web: "https://app.radicle.xyz/nodes/seed.radicle.garden",
+  });
+  expect(cfg.instances[1]).toEqual({ id: "mine", type: "radicle", url: "http://localhost:8080/api/v1", user: "did:key:z6MkLaptop", emails: [] });
+  expect(() => parseConfig("instances:\n  - {id: a, type: radicle, url: x, user: u, repos: [z3gq]}", {}))
+    .toThrow("config: instances[0]: 'z3gq' is not a Radicle repo id (rad:z…)");
+  expect(() => parseConfig("instances:\n  - {id: a, type: radicle, url: x, user: u, web: 'not a url'}", {}))
+    .toThrow("config: instances[0]: 'web' must be a URL");
+  expect(() => parseConfig("instances:\n  - {id: a, type: radicle, url: x, user: []}", {}))
+    .toThrow("config: instances[0]: 'user' is required (one identity or a list)");
+  // Only Radicle accepts a list.
+  expect(() => parseConfig("instances:\n  - {id: a, type: github, url: x, user: [a, b]}", {}))
+    .toThrow("config: instances[0]: 'user' is required");
+});
+
 test("maintainer_domains: optional, lowercased, leading @ dropped", () => {
   const cfg = parseConfig("instances:\n  - {id: a, type: bugzilla, url: x, user: u, maintainer_domains: [FreeBSD.org, '@kde.org']}", {});
   expect(cfg.instances[0]?.maintainerDomains).toEqual(["freebsd.org", "kde.org"]);

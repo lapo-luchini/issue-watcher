@@ -3,14 +3,20 @@
 import { parse } from "yaml";
 import type { FilterConfig } from "./filter.ts";
 
-export type InstanceType = "github" | "gitlab" | "forgejo" | "bugzilla";
-const INSTANCE_TYPES: readonly string[] = ["github", "gitlab", "forgejo", "bugzilla"];
+export type InstanceType = "github" | "gitlab" | "forgejo" | "bugzilla" | "radicle";
+const INSTANCE_TYPES: readonly string[] = ["github", "gitlab", "forgejo", "bugzilla", "radicle"];
 
 export interface InstanceConfig {
   id: string;
   type: InstanceType;
   url: string; // API base URL, no trailing slash
-  user: string; // login (or email for Bugzilla)
+  user: string; // login (or email for Bugzilla, DID for Radicle); the first one if `user` is a list
+  // Radicle only: all my identities when `user` is a list (e.g. one DID per machine).
+  users?: string[];
+  // Radicle only: the repos (rad:…) to watch; absent means every repo the node seeds.
+  repos?: string[];
+  // Radicle only: web base for item links, no trailing slash (default: app.radicle.xyz for the node).
+  web?: string;
   // My commit emails, to recognize my commits when the forge does not link them to `user`:
   // the instance's own `emails` list if it has one, else the top-level `emails` list, else [].
   emails: string[];
@@ -49,18 +55,34 @@ export function parseConfig(text: string, env: Record<string, string | undefined
   const seen = new Set<string>();
   const instances = raw.instances.map((r: any, i: number): InstanceConfig => {
     const where = `config: instances[${i}]`;
-    for (const k of ["id", "type", "url", "user"]) {
+    for (const k of ["id", "type", "url"]) {
       if (typeof r?.[k] !== "string" || r[k] === "") throw new Error(`${where}: '${k}' is required`);
     }
     if (!INSTANCE_TYPES.includes(r.type)) throw new Error(`${where}: unknown type '${r.type}'`);
     if (seen.has(r.id)) throw new Error(`${where}: duplicate id '${r.id}'`);
     seen.add(r.id);
+    // `user` is one login, or (Radicle, where each machine may have its own identity) a list.
+    const users = typeof r?.user === "string" && r.user !== "" ? [r.user]
+      : r.type === "radicle" && Array.isArray(r?.user) && r.user.length > 0 ? stringList(r.user, where, "user")!
+      : undefined;
+    if (!users) throw new Error(`${where}: 'user' is required` + (r.type === "radicle" ? " (one identity or a list)" : ""));
     const inst: InstanceConfig = {
-      id: r.id, type: r.type, url: r.url.replace(/\/+$/, ""), user: r.user,
+      id: r.id, type: r.type, url: r.url.replace(/\/+$/, ""), user: users[0]!,
       emails: stringList(r.emails, where, "emails") ?? defaultEmails,
     };
+    if (users.length > 1) inst.users = users;
     const domains = stringList(r.maintainer_domains, where, "maintainer_domains");
     if (domains) inst.maintainerDomains = domains.map((d) => d.toLowerCase().replace(/^@/, ""));
+    const repos = stringList(r.repos, where, "repos");
+    if (repos) {
+      const bad = repos.find((x) => !/^rad:z[1-9A-HJ-NP-Za-km-z]+$/.test(x));
+      if (bad) throw new Error(`${where}: '${bad}' is not a Radicle repo id (rad:z…)`);
+      inst.repos = repos;
+    }
+    if (r.web !== undefined) {
+      if (typeof r.web !== "string" || !URL.canParse(r.web)) throw new Error(`${where}: 'web' must be a URL`);
+      inst.web = r.web.replace(/\/+$/, "");
+    }
     if (r.token_env) {
       const token = env[r.token_env];
       if (token) inst.token = token;
