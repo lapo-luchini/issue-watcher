@@ -48,7 +48,7 @@ export async function pollAll(ctx: PollContext, opts: { only?: string; dryRun?: 
     return results;
   } finally {
     if (opts.dryRun) ctx.store.rollback();
-    ctx.store.releaseLock("poll");
+    ctx.store.releaseLock("poll", lockHolder()); // not a lock taken over after ours went stale
   }
 }
 

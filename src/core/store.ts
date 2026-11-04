@@ -1,6 +1,7 @@
 // SQLite cache (var/cache.sqlite, git-ignored, rebuildable): items, events, poll runs, locks, retries.
 // All timestamps are ISO-8601 UTC strings from Date.toISOString(), so they compare correctly as text.
 import { Database } from "bun:sqlite";
+import { readFileSync, readlinkSync } from "node:fs";
 import { hostname } from "node:os";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, KnownItem, Verdict } from "./model.ts";
 
@@ -87,15 +88,33 @@ CREATE TABLE IF NOT EXISTS retry (
 );
 `;
 
-/** Identifies this process as a lock holder: "pid@hostname". */
-export function lockHolder(): string {
-  return `${process.pid}@${hostname()}`;
+/**
+ * Where PIDs mean something: the PID namespace and boot, where Linux tells them (a container
+ * may share the host's name but not its PIDs), else "" (e.g. FreeBSD, without procfs).
+ */
+function pidSpace(): string {
+  try {
+    const ns = readlinkSync("/proc/self/ns/pid");
+    const boot = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    return `${ns}/${boot}`;
+  } catch {
+    return "";
+  }
+}
+const PID_SPACE = pidSpace();
+
+/** Identifies a process (this one by default) as a lock holder: "pid@hostname[#pidspace]". */
+export function lockHolder(pid: number = process.pid): string {
+  return `${pid}@${hostname()}${PID_SPACE ? `#${PID_SPACE}` : ""}`;
 }
 
-/** True when `holder` is a process of this host that has exited. Other hosts and formats: unknown, so false. */
+/**
+ * True when `holder` is a process of this host and PID space that has exited. Other hosts,
+ * namespaces, boots and formats cannot be checked from here: false.
+ */
 function holderIsGone(holder: string): boolean {
-  const m = holder.match(/^(\d+)@(.+)$/);
-  if (!m || m[2] !== hostname()) return false;
+  const m = holder.match(/^(\d+)@([^#]+)(?:#(.*))?$/);
+  if (!m || m[2] !== hostname() || (m[3] ?? "") !== PID_SPACE) return false;
   try {
     process.kill(Number(m[1]), 0); // signal 0: only checks that the process exists
     return false;
@@ -292,7 +311,8 @@ export class Store {
    */
   acquireLock(name: string, holder: string, now: Date, staleMs = 30 * 60_000): boolean {
     const current = this.db.query("SELECT holder FROM locks WHERE name = $name").get({ name }) as { holder: string } | null;
-    if (current && holderIsGone(current.holder)) this.releaseLock(name);
+    // Only that holder's row: another poller may have taken the lock over a moment ago.
+    if (current && holderIsGone(current.holder)) this.releaseLock(name, current.holder);
     const staleBefore = new Date(now.getTime() - staleMs).toISOString();
     this.db.query("DELETE FROM locks WHERE name = $name AND acquired_at < $staleBefore").run({ name, staleBefore });
     return this.db.query("INSERT OR IGNORE INTO locks (name, holder, acquired_at) VALUES ($name, $holder, $at)")
@@ -307,7 +327,12 @@ export class Store {
     return r.acquired_at >= new Date(now.getTime() - staleMs).toISOString();
   }
 
-  releaseLock(name: string): void {
+  /** Releases the lock; with `holder`, only if that holder still has it. */
+  releaseLock(name: string, holder?: string): void {
+    if (holder !== undefined) {
+      this.db.query("DELETE FROM locks WHERE name = $name AND holder = $holder").run({ name, holder });
+      return;
+    }
     this.db.query("DELETE FROM locks WHERE name = $name").run({ name });
   }
 

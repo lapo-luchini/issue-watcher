@@ -92,23 +92,35 @@ test("locks exclude, release, and expire", () => {
 
 test("a lock held by a process that no longer exists on this host is taken over at once", () => {
   const t0 = new Date("2026-11-04T10:00:00Z");
-  const host = lockHolder().split("@")[1];
   // A pid that is certainly not running: spawn a process and wait for it to exit.
-  const dead = Bun.spawnSync(["true"]).pid;
-  expect(store.acquireLock("poll", `${dead}@${host}`, t0)).toBe(true);
+  const dead = lockHolder(Bun.spawnSync(["true"]).pid);
+  expect(store.acquireLock("poll", dead, t0)).toBe(true);
   expect(store.acquireLock("poll", lockHolder(), t0)).toBe(true);
   // A live holder (this very process) keeps it.
-  expect(store.acquireLock("poll", `${dead}@${host}`, t0)).toBe(false);
+  expect(store.acquireLock("poll", dead, t0)).toBe(false);
   store.releaseLock("poll");
-  // On another host liveness cannot be checked: only the 30-minute expiry applies.
-  expect(store.acquireLock("poll", `${dead}@another-host`, t0)).toBe(true);
-  expect(store.acquireLock("poll", lockHolder(), t0)).toBe(false);
-  expect(store.lockHeld("poll", t0)).toBe(true);
-  expect(store.lockHeld("poll", new Date(t0.getTime() + 31 * 60_000))).toBe(false);
-  store.releaseLock("poll");
+  // On another host, or in another PID namespace (a container sharing the host name), liveness
+  // cannot be checked: only the 30-minute expiry applies.
+  for (const elsewhere of [dead.replace(/@[^#]+/, "@another-host"), `${dead.split("#")[0]}#pid:[1]/other-boot`]) {
+    expect(store.acquireLock("poll", elsewhere, t0)).toBe(true);
+    expect(store.acquireLock("poll", lockHolder(), t0)).toBe(false);
+    expect(store.lockHeld("poll", t0)).toBe(true);
+    expect(store.lockHeld("poll", new Date(t0.getTime() + 31 * 60_000))).toBe(false);
+    store.releaseLock("poll");
+  }
   expect(store.lockHeld("poll", t0)).toBe(false);
-  store.acquireLock("poll", `${dead}@${host}`, t0);
+  store.acquireLock("poll", dead, t0);
   expect(store.lockHeld("poll", t0)).toBe(false); // its process is gone
+});
+
+test("taking over a dead holder's lock removes only that holder's row", () => {
+  // Two pollers saw the same dead holder; the first took the lock. The second must not
+  // delete the first one's fresh lock.
+  const t0 = new Date("2026-11-04T10:00:00Z");
+  const dead = lockHolder(Bun.spawnSync(["true"]).pid);
+  store.acquireLock("poll", lockHolder(), t0);
+  store.releaseLock("poll", dead); // what the slower poller would do
+  expect(store.lockHeld("poll", t0)).toBe(true);
 });
 
 test("waits for a busy database instead of failing at once", () => {
