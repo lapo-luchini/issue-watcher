@@ -71,6 +71,20 @@ test("first sight is baseline: history stored, nothing unread", () => {
   expect(unread(PR)).toBe(false);
 });
 
+test("first sight on a later run: with unreliable timestamps, nothing is baseline", () => {
+  // Radicle: author clocks, and patches arrive late by gossip. An item new to discovery after
+  // the first run is news, whatever its timestamps say.
+  const since = minutes(-10);
+  const old = comment("c:1", minutes(-600), "contributor", "A patch written offline last week.", "alice");
+  expect(applySnapshot(snapshot(PR, [old], { timesUnreliable: true }), ctx, T0, since)).toBe(1);
+  expect(unread(PR)).toBe(true);
+  // The first run still starts quiet, and reliable timestamps keep the usual rule.
+  const other = "https://github.com/x/y/pull/9";
+  expect(applySnapshot(snapshot(other, [{ ...old }], { timesUnreliable: true }), ctx, T0, null)).toBe(0);
+  const third = "https://github.com/x/y/pull/10";
+  expect(applySnapshot(snapshot(third, [{ ...old }]), ctx, T0, since)).toBe(0);
+});
+
 test("new signal after baseline makes the item unread, noise does not", () => {
   applySnapshot(snapshot(PR, []), ctx, T0, null);
   expect(applySnapshot(snapshot(PR, [comment("c:2", minutes(5), "contributor", "+1", "rando")]), ctx, minutes(10), null)).toBe(0);

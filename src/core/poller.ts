@@ -192,7 +192,8 @@ export function applySnapshot(
       itemUrl: url, key: ev.key, kind: ev.kind, actor: ev.actor, actorRole: ev.actorRole,
       at: ev.at.toISOString(), detectedAt: nowIso, excerpt: ev.body ? ev.body.slice(0, 500) : null,
       details: ev.details ?? null, isSignal: verdict.isSignal, reason: verdict.reason,
-      isBaseline: !prev && (since === null || ev.at < since),
+      // With unreliable timestamps, an item first seen after the first run is news as a whole.
+      isBaseline: !prev && (since === null || (!snap.timesUnreliable && ev.at < since)),
     };
     if (!store.insertEvent(row) || row.isBaseline) continue; // already known, or baseline
     if (ev.actorRole === "me") {

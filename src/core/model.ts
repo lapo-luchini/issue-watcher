@@ -43,6 +43,9 @@ export interface Snapshot {
   hasConflicts?: boolean | null; // null: unknown (e.g. the forge is still computing it)
   authoredByMe: boolean;
   maintainedByMe?: boolean; // the item belongs to a repo I maintain (e.g. a Radicle delegate)
+  // Event times come from authors' clocks or arrive late (Radicle): on first sight after the
+  // first run they cannot tell old history from news, so none of it is baseline.
+  timesUnreliable?: boolean;
   labels: string[];
   events: NormalizedEvent[];
 }
