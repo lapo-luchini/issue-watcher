@@ -40,4 +40,13 @@ test("validation errors", () => {
   const dup = "instances:\n  - {id: a, type: github, url: x, user: u}\n  - {id: a, type: gitlab, url: y, user: u}";
   expect(() => parseConfig(dup, {})).toThrow("duplicate id 'a'");
   expect(() => parseConfig("instances: []\nfilter:\n  noise_patterns: ['(']", {})).toThrow("invalid noise pattern");
+  expect(() => parseConfig("instances:\n  - {id: a, type: github, url: x, user: u, emails: me@x.org}", {}))
+    .toThrow("'emails' must be a list of strings");
+  expect(() => parseConfig("instances:\n  - {id: a, type: github, url: x, user: u, emails: [3]}", {}))
+    .toThrow("'emails' must be a list of strings");
+});
+
+test("optional commit emails per instance", () => {
+  const cfg = parseConfig("instances:\n  - {id: a, type: github, url: x, user: u, emails: [me@x.org, Me@Work.example]}", {});
+  expect(cfg.instances[0]?.emails).toEqual(["me@x.org", "Me@Work.example"]);
 });

@@ -154,6 +154,7 @@ instances:
     url: https://api.github.com
     user: lapo
     token_env: GITHUB_TOKEN
+    emails: [lapo@example.org]  # optional: my commit emails, for commits not linked to `user`
   - id: freebsd-bz
     type: bugzilla
     url: https://bugs.freebsd.org/bugzilla

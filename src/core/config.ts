@@ -11,6 +11,7 @@ export interface InstanceConfig {
   type: InstanceType;
   url: string; // API base URL, no trailing slash
   user: string; // login (or email for Bugzilla)
+  emails?: string[]; // my commit emails, to recognize my commits when the forge does not link them to `user`
   token?: string; // resolved from the env variable named by token_env
   disabledReason?: string; // set when token_env is configured but the variable is missing
 }
@@ -40,6 +41,12 @@ export function parseConfig(text: string, env: Record<string, string | undefined
     if (seen.has(r.id)) throw new Error(`${where}: duplicate id '${r.id}'`);
     seen.add(r.id);
     const inst: InstanceConfig = { id: r.id, type: r.type, url: r.url.replace(/\/+$/, ""), user: r.user };
+    if (r.emails !== undefined) {
+      if (!Array.isArray(r.emails) || !r.emails.every((e: unknown) => typeof e === "string" && e !== "")) {
+        throw new Error(`${where}: 'emails' must be a list of strings`);
+      }
+      inst.emails = r.emails;
+    }
     if (r.token_env) {
       const token = env[r.token_env];
       if (token) inst.token = token;

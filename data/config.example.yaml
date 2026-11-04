@@ -6,6 +6,9 @@ instances:
     url: https://api.github.com
     user: your-github-login
     token_env: GITHUB_TOKEN
+    # Optional: your commit emails, so your own pushes are recognized even when an email
+    # is not linked to your GitHub account (compared case-insensitively).
+    # emails: [you@example.org, you@work.example]
 
 # Optional filter tuning (these are the defaults).
 filter:

@@ -13,10 +13,12 @@ interface GhIssue {
   labels: (string | { name: string })[];
 }
 interface GhPull { merged: boolean; mergeable_state?: string; head: { sha: string } }
+interface GhCommitPerson { name: string; email: string; date: string }
 interface GhCommit {
   sha: string;
-  author: GhUser | null; // GitHub account linked to the commit email, if any
-  commit: { message: string; author: { name: string; date: string } | null; committer: { date: string } | null };
+  author: GhUser | null; // GitHub account linked to the commit author email, if any
+  committer: GhUser | null; // same, for the committer email
+  commit: { message: string; author: GhCommitPerson | null; committer: GhCommitPerson | null };
 }
 interface GhTimelineEvent {
   event: string;
@@ -41,10 +43,12 @@ const FAILED_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "action
 export class GitHubAdapter implements Adapter {
   private readonly web: string;
   private readonly me: string;
+  private readonly emails: Set<string>; // lowercase
 
   constructor(private readonly inst: InstanceConfig, private readonly http: HttpDeps = defaultHttp) {
     this.web = inst.url === "https://api.github.com" ? "https://github.com" : inst.url.replace(/\/api\/v3$/, "");
     this.me = inst.user.toLowerCase();
+    this.emails = new Set((inst.emails ?? []).map((e) => e.toLowerCase()));
   }
 
   private headers(): Record<string, string> {
@@ -190,11 +194,16 @@ export class GitHubAdapter implements Adapter {
   }
 
   private mapCommit(c: GhCommit): NormalizedEvent {
+    // c.author is null when the commit email is not linked to an account, so also check the
+    // committer (I may have pushed someone else's patch) and my configured commit emails.
+    const logins = [c.author?.login, c.committer?.login].map((l) => l?.toLowerCase());
+    const emails = [c.commit.author?.email, c.commit.committer?.email].map((e) => e?.toLowerCase());
+    const mine = logins.includes(this.me) || emails.some((e) => e !== undefined && this.emails.has(e));
     return {
       key: `commit:${c.sha}`,
       kind: "push",
       actor: c.author?.login ?? c.commit.author?.name ?? "unknown",
-      actorRole: this.role(c.author),
+      actorRole: mine ? "me" : this.role(c.author),
       at: new Date(c.commit.committer?.date ?? c.commit.author?.date ?? 0),
       details: { sha: c.sha.slice(0, 12), message: c.commit.message.split("\n")[0] },
     };

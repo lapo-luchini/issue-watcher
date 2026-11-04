@@ -1,13 +1,14 @@
 // GitHub adapter against a fake API: responses are minimal, sanitized shapes of real GitHub payloads.
 import { expect, test } from "bun:test";
 import { GitHubAdapter } from "../src/adapters/github.ts";
+import type { InstanceConfig } from "../src/core/config.ts";
 import type { HttpDeps } from "../src/core/http.ts";
 
 const API = "https://api.github.com";
 const inst = { id: "github", type: "github" as const, url: API, user: "lapo", token: "t" };
 
 /** Fake GitHub: maps "path?query" (without the API base) to a JSON body or a status code. */
-function fakeGitHub(routes: Record<string, unknown>) {
+function fakeGitHub(routes: Record<string, unknown>, extra: Partial<InstanceConfig> = {}) {
   const calls: string[] = [];
   const http: HttpDeps = {
     fetchFn: async (url) => {
@@ -22,7 +23,7 @@ function fakeGitHub(routes: Record<string, unknown>) {
     retries: 0,
     timeoutMs: 1000,
   };
-  return { adapter: new GitHubAdapter(inst, http), calls };
+  return { adapter: new GitHubAdapter({ ...inst, ...extra }, http), calls };
 }
 
 const PR = "https://github.com/foo/bar/pull/42";
@@ -82,6 +83,31 @@ test("fetch normalizes a merged PR", async () => {
   expect(byKey["m:6"]).toMatchObject({ kind: "mention", actorRole: "unknown" });
   expect(byKey["s:8"]).toMatchObject({ kind: "state", details: { to: "merged" } });
   expect(byKey["commit:abc123def4567890"]).toMatchObject({ kind: "push", actorRole: "me", details: { sha: "abc123def456", message: "Fix build" } });
+});
+
+test("own commits are recognized by committer login or configured email", async () => {
+  const commit = (sha: string, author: unknown, committer: unknown, authorEmail: string, committerEmail: string) => ({
+    sha, author, committer,
+    commit: {
+      message: "msg",
+      author: { name: "Someone", email: authorEmail, date: "2026-10-30T09:00:00Z" },
+      committer: { name: "Someone", email: committerEmail, date: "2026-10-30T09:00:00Z" },
+    },
+  });
+  const { adapter } = fakeGitHub({
+    ...prRoutes,
+    "/repos/foo/bar/pulls/42/commits?per_page=100": [
+      commit("unlinked0000", null, null, "Lapo@Home.Example", "noreply@github.com"), // email not linked to an account
+      commit("committer000", { login: "maint" }, { login: "lapo" }, "maint@x.org", "x@y.org"), // I pushed someone's patch
+      commit("committermail", null, null, "maint@x.org", "lapo@home.example"),
+      commit("foreign00000", { login: "maint" }, { login: "web-flow" }, "maint@x.org", "noreply@github.com"),
+    ],
+  }, { emails: ["lapo@home.example"] });
+  const snap = await adapter.fetch({ url: PR, instance: "github", kind: "pr" });
+  const roles = Object.fromEntries(snap.events.filter((e) => e.kind === "push").map((e) => [e.key, e.actorRole]));
+  expect(roles).toEqual({
+    "commit:unlinked0000": "me", "commit:committer000": "me", "commit:committermail": "me", "commit:foreign00000": "unknown",
+  });
 });
 
 test("issues skip PR-only calls", async () => {
