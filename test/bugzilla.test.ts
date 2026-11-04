@@ -136,16 +136,19 @@ const SEARCH = "/bug?email1=me%40example.org&emailtype1=equals&emailreporter1=1&
   + "&emaillongdesc1=1&emailqa_contact1=1&include_fields=id&order=bug_id";
 /** Bugs where a flag was requested of me. */
 const REQUESTED = "/bug?f1=requestees.login_name&o1=equals&v1=me%40example.org&include_fields=id&order=bug_id";
+/** The login lookup discover() starts with; Bugzilla answers with the stored spelling. */
+const LOGIN = { "/user?names=me%40example.org": { users: [{ id: 1, name: "me@example.org" }] } };
 
 test("discover: first run asks for open bugs I am involved in, paging until a short page", async () => {
   const fullPage = Array.from({ length: 500 }, (_, i) => ({ id: i + 1 }));
   const { adapter, calls } = fakeBugzilla({
+    ...LOGIN,
     [`${SEARCH}&resolution=---&limit=500&offset=0`]: { bugs: fullPage },
     [`${SEARCH}&resolution=---&limit=500&offset=500`]: { bugs: [{ id: 300491 }] },
     [`${REQUESTED}&resolution=---&limit=500&offset=0`]: { bugs: [{ id: 300491 }, { id: 7 }] }, // 300491: deduplicated
   });
   const refs = await adapter.discover(null);
-  expect(calls).toHaveLength(3);
+  expect(calls).toHaveLength(4);
   expect(refs).toHaveLength(501);
   expect(refs[0]).toEqual({ url: `${WEB}/show_bug.cgi?id=1`, instance: "freebsd", kind: "bug" });
   expect(refs[500]).toEqual(ref);
@@ -153,13 +156,38 @@ test("discover: first run asks for open bugs I am involved in, paging until a sh
 
 test("discover: later runs ask for anything changed since the cursor, closed bugs included", async () => {
   const { adapter, calls } = fakeBugzilla({
+    ...LOGIN,
     [`${SEARCH}&last_change_time=2026-11-01T10%3A00%3A00Z&limit=500&offset=0`]: { bugs: [{ id: 300491 }] },
     [`${REQUESTED}&last_change_time=2026-11-01T10%3A00%3A00Z&limit=500&offset=0`]: { bugs: [{ id: 42 }] },
   });
   expect(await adapter.discover(new Date("2026-11-01T10:00:00.123Z"))).toEqual([
     ref, { url: `${WEB}/show_bug.cgi?id=42`, instance: "freebsd", kind: "bug" },
   ]);
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(3);
+  // The login is looked up once per adapter, not on every run.
+  await adapter.discover(new Date("2026-11-01T10:00:00.123Z"));
+  expect(calls.filter((c) => c.startsWith("/user?"))).toHaveLength(1);
+});
+
+test("discover: searches use the login as Bugzilla stores it, whatever the case in the config", async () => {
+  // Bugzilla's email searches are case-sensitive: "lapo@freebsd.org" finds nothing when the
+  // account is "lapo@FreeBSD.org". The user lookup is case-insensitive and returns the stored name.
+  const stored = "Me@Example.org";
+  const search = SEARCH.replace("me%40example.org", "Me%40Example.org");
+  const requested = REQUESTED.replace("me%40example.org", "Me%40Example.org");
+  const { adapter } = fakeBugzilla({
+    "/user?names=me%40example.org": { users: [{ id: 1, name: stored }] },
+    [`${search}&resolution=---&limit=500&offset=0`]: { bugs: [{ id: 300491 }] },
+    [`${requested}&resolution=---&limit=500&offset=0`]: { bugs: [] },
+  });
+  expect(await adapter.discover(null)).toEqual([ref]);
+});
+
+test("discover: an unknown login is a clear error, not an empty result", async () => {
+  const noUser = new Response(JSON.stringify({ error: true, code: 51, message: "There is no user named 'me@example.org'." }),
+    { status: 404, headers: { "content-type": "application/json" } });
+  const { adapter } = fakeBugzilla({ "/user?names=me%40example.org": noUser });
+  await expect(adapter.discover(null)).rejects.toThrow("Bugzilla has no account named 'me@example.org': check `user` in config.yaml");
 });
 
 test("fetch normalizes a closed ports PR", async () => {

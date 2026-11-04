@@ -78,6 +78,7 @@ export class BugzillaAdapter implements Adapter {
   private readonly api: string;
   private readonly http: HttpDeps;
   private readonly mine: Set<string>; // my logins/emails, lowercase
+  private storedLogin: string | null = null; // inst.user as Bugzilla spells it, see login()
 
   constructor(private readonly inst: InstanceConfig, http: HttpDeps = defaultHttp) {
     this.web = new URL(inst.url);
@@ -146,15 +147,38 @@ export class BugzillaAdapter implements Adapter {
   }
 
   /**
+   * My login as Bugzilla stores it. Email searches are case-sensitive ("lapo@freebsd.org" finds
+   * nothing when the account is "lapo@FreeBSD.org"), but the user lookup is not, and it returns
+   * the stored spelling. It also turns a mistyped `user` into an error instead of an empty result.
+   * Looked up once per adapter; works anonymously.
+   */
+  private async login(): Promise<string> {
+    if (this.storedLogin) return this.storedLogin;
+    let users: { name: string }[];
+    try {
+      users = (await this.get<{ users: { name: string }[] }>(`/user?names=${encodeURIComponent(this.inst.user)}`)).users;
+    } catch (err) {
+      // Bugzilla answers an unknown name with HTTP 404 (error code 51).
+      if (!(err instanceof GoneError)) throw err;
+      users = [];
+    }
+    const name = users[0]?.name;
+    if (!name) throw new Error(`Bugzilla has no account named '${this.inst.user}': check \`user\` in config.yaml`);
+    this.storedLogin = name;
+    return name;
+  }
+
+  /**
    * Two searches: bugs I reported, am assigned to, am CC'd on, am QA contact for or commented on;
    * and bugs where someone asked me for a flag (needinfo?(me), review?(me)), which does not CC
    * me. Together they cover everything, so `known` is not needed. Both work anonymously.
    */
   async discover(since: Date | null): Promise<ItemRef[]> {
+    const login = await this.login();
     const criteria: Record<string, string>[] = [
-      { email1: this.inst.user, emailtype1: "equals",
+      { email1: login, emailtype1: "equals",
         emailreporter1: "1", emailassigned_to1: "1", emailcc1: "1", emaillongdesc1: "1", emailqa_contact1: "1" },
-      { f1: "requestees.login_name", o1: "equals", v1: this.inst.user },
+      { f1: "requestees.login_name", o1: "equals", v1: login },
     ];
     const ids = new Set<number>();
     for (const c of criteria) {
