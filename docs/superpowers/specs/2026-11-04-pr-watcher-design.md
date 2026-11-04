@@ -64,6 +64,8 @@ watcher/
     intent.ts            read/write items.yaml, git commit on change
     store.ts             SQLite cache access
     filter.ts            signal/noise classification (pluggable function)
+    http.ts              JSON fetch: timeout, retry, gone/rate-limit errors, pagination
+    summary.ts           one-line event summaries
     poller.ts            discover → fetch → diff → filter → store
     api.ts               query/command API shared by all front ends
   src/adapters/
@@ -86,7 +88,10 @@ storage.
 
 ```ts
 interface Adapter {
+  // Parse a web URL belonging to this instance (items added by hand, UI validation).
+  refFromUrl(url: string): ItemRef | null;
   // Items involving me that changed since `since` (incremental discovery).
+  // `since` null = first run: open items only.
   discover(since: Date | null): Promise<ItemRef[]>;
   // Full current view of one item, with its complete normalized timeline.
   fetch(ref: ItemRef): Promise<Snapshot>;
@@ -125,8 +130,9 @@ Per instance, one "involving me, updated since cursor" query, then full fetch on
 returned items:
 
 - **GitHub**: `search/issues?q=involves:USER updated:>T` (covers authored, assigned,
-  mentioned, commented). Plus a **daily** `/notifications?all=true` sweep, used only for
-  discovery of issues I merely subscribed to.
+  mentioned, commented). Plus, on every incremental poll, `/notifications?all=true&since=T`
+  (one cheap call), used only for discovery of issues I merely subscribed to; skipped when
+  the token cannot read notifications (fine-grained tokens).
 - **GitLab**: `/issues` and `/merge_requests` with `scope=all`, author / assignee /
   reviewer filters, `updated_after=T`.
 - **Forgejo**: `/repos/issues/search` with `since=T` and created / assigned / mentioned.
@@ -186,9 +192,9 @@ items:
 
 - `items`: url (PK), id (short hash of url), instance, kind, repo, title, state,
   state_detail, ci_state, authored_by_me, labels_json, last_signal_at, last_signal_summary,
-  seen_at, baseline_at, etag, fetched_at, snapshot_json
-- `events`: item_url, event_key, kind, actor, actor_role, at, excerpt, is_signal, reason —
-  unique (item_url, event_key)
+  seen_at, baseline_at, fetched_at, snapshot_json
+- `events`: item_url, event_key, kind, actor, actor_role, at, detected_at, excerpt,
+  details_json, is_signal, reason — unique (item_url, event_key)
 - `poll_runs`: instance, started_at, finished_at, cursor, error
 - `locks`: name (PK), holder, acquired_at — prevents overlapping polls
 
@@ -198,9 +204,15 @@ Rules:
   (`signal:review`, `noise:+1`, `noise:bot`, …). `watcher refilter` re-evaluates stored
   events after filter changes without re-polling.
 - **Baseline**: the first time an item is seen, its existing events are stored with
-  `baseline_at` set; events at or before the baseline never make the item unread. A fresh
-  cache therefore starts quiet.
-- **Unread** ⇔ `last_signal_at > seen_at` (or seen_at null and a signal after baseline).
+  `detected_at = baseline_at` and never make the item unread. A fresh cache therefore
+  starts quiet.
+- **Detection time**: `last_signal_at` is when *we detected* the latest signal (local
+  clock), not the forge timestamp, so unread compares local time with local time and a
+  late-arriving event with an old timestamp (e.g. an old commit pushed now) still counts.
+- **Unread** ⇔ `last_signal_at > seen_at` (or `seen_at` null and any `last_signal_at`).
+- **Own activity**: my own event newer than the latest new signal sets `seen_at`.
+- **CI**: `ci_state` keeps the last *settled* result (`pending` does not overwrite it); a
+  first green result is not signal, a first red one or any later change is.
 - **Cursor**: per instance; the next query uses `cursor − 5 min` overlap; dedup by
   `event_key` absorbs the overlap.
 
@@ -228,8 +240,9 @@ Replaceable/augmentable later (e.g. by an LLM classifier).
 - Author is me → not signal; instead marks the item seen at that time.
 - Author is a bot (`[bot]` suffix, known bot names such as stale bots, dependabot, codecov,
   CI bots) and not in `bot_allowlist`.
-- Body is only emoji/reactions, or matches a `noise_patterns` entry (case- and
-  punctuation-insensitive).
+- Body is only emoji/reactions, or — when at most 100 characters after normalization —
+  matches a `noise_patterns` entry (case- and punctuation-insensitive), so a long,
+  substantive comment starting with "Any update" still counts.
 - Body is shorter than `min_comment_length` **and** the author is not a maintainer.
 
 Comments by maintainers / members / collaborators (`actorRole: maintainer`) always count
@@ -280,15 +293,18 @@ proxy with authentication, which is documented in the README.
 - Missing token in `.env` → instance disabled with a clear status message.
 - HTTP: 30 s timeout; retry transient failures (5xx, network) up to 3 times with
   exponential backoff.
-- **GitHub**: ETag conditional requests for item fetches (`304` responses are free);
-  respect `X-RateLimit-Remaining` and `Retry-After`; when the budget runs low, stop the
-  instance cleanly without advancing the cursor. Search (30/min) is used once per run.
+- **GitHub**: on a rate-limit response (403 with `X-RateLimit-Remaining: 0` or
+  `Retry-After`, or 429), stop the instance cleanly without advancing the cursor and report
+  the reset time. Search (30/min) is used once per run. No ETag conditional requests:
+  discovery only returns changed items, so a `304` would almost never happen.
 - Other forges: at most 4 concurrent requests per instance, same backoff policy.
 
 ## 8. CLI
 
 ```
 watcher poll [--instance ID] [--dry-run]   one-shot poll; --dry-run prints, writes nothing
+watcher list [--all] [--muted]             unread items (usable before the web UI exists)
+watcher seen [URL...]                      mark items seen (no URL: all)
 watcher serve [--port N]                   HTTP API + SPA
 watcher refilter                           re-run filter over stored events
 ```
