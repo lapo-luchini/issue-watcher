@@ -31,7 +31,8 @@ bun run watcher seen URL... | --all
 bun run watcher refilter
 ```
 
-`seen` takes item URLs exactly as `list` shows them; marking everything seen needs `seen --all`.
+`seen` takes item URLs as `list` shows them (a URL copied from the browser, e.g. with
+`/files` or a `#fragment`, works too); marking everything seen needs `seen --all`.
 
 ## Polling periodically
 

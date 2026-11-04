@@ -10,7 +10,11 @@ import { summarize } from "./summary.ts";
 /** Each run re-queries this much before the cursor, to tolerate clock skew; event keys dedup the overlap. */
 export const CURSOR_OVERLAP_MS = 5 * 60_000;
 const FETCH_CONCURRENCY = 4;
-/** An item whose fetch fails this many runs in a row is dropped from the retry table. */
+/**
+ * An item whose fetch fails this many runs in a row is dropped from the retry table.
+ * Its first_since goes with it, so if a never-stored item is rediscovered later, activity
+ * older than that later run's cursor is baselined (accepted trade-off for giving up).
+ */
 const MAX_FETCH_ATTEMPTS = 5;
 
 export interface PollContext {

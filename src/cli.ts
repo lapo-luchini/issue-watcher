@@ -3,11 +3,10 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { createAdapter } from "./adapters/index.ts";
+import { canonicalIntentFor, createAdapter, urlRecognizer } from "./adapters/index.ts";
 import { listItems, markSeen } from "./core/api.ts";
-import { loadConfig, type Config } from "./core/config.ts";
-import { canonicalizeIntent, loadIntent, type Intent } from "./core/intent.ts";
-import type { Adapter, ItemRef } from "./core/model.ts";
+import { loadConfig } from "./core/config.ts";
+import { loadIntent } from "./core/intent.ts";
 import { pollAll, refilter } from "./core/poller.ts";
 import { Store } from "./core/store.ts";
 
@@ -17,28 +16,6 @@ const USAGE = `usage: watcher <command> [options]
   list [--all] [--muted]             show unread items (--all: every item)
   seen URL... | seen --all           mark the given items (or all items) seen
   refilter                           re-run the noise filter over stored events`;
-
-/** Keys items.yaml entries by canonical URL, warning about entries no configured instance recognizes. */
-function canonicalIntent(config: Config, raw: Intent): Intent {
-  const adapters: Adapter[] = [];
-  for (const inst of config.instances) {
-    try {
-      adapters.push(createAdapter(inst));
-    } catch {
-      // No adapter for this instance type yet: its URLs cannot be recognized.
-    }
-  }
-  const refFromUrl = (url: string): ItemRef | null => {
-    for (const a of adapters) {
-      const ref = a.refFromUrl(url);
-      if (ref) return ref;
-    }
-    return null;
-  };
-  const { intent, unknown } = canonicalizeIntent(raw, refFromUrl);
-  for (const url of unknown) console.error(`watcher: warning: items.yaml: no configured instance recognizes ${url}; ignored`);
-  return intent;
-}
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -64,7 +41,8 @@ async function main(argv: string[]): Promise<number> {
 
   const home = process.env.WATCHER_HOME ?? join(import.meta.dir, "..");
   const config = await loadConfig(join(home, "data/config.yaml"));
-  const intent = canonicalIntent(config, await loadIntent(join(home, "data/items.yaml")));
+  const { intent, unknown } = canonicalIntentFor(config, await loadIntent(join(home, "data/items.yaml")));
+  for (const url of unknown) console.error(`watcher: warning: items.yaml: no configured instance recognizes ${url}; ignored`);
   mkdirSync(join(home, "var"), { recursive: true });
   const store = new Store(join(home, "var/cache.sqlite"));
   try {
@@ -102,9 +80,11 @@ async function main(argv: string[]): Promise<number> {
           console.log(`${markSeen(store, [], now)} item(s) marked seen`);
           return 0;
         }
+        const recognize = urlRecognizer(config);
         let marked = 0;
         for (const url of args) {
-          if (markSeen(store, [url], now) > 0) marked++;
+          // Accept browser-copied URLs too (trailing slash, PR tab, #fragment…).
+          if (markSeen(store, [recognize(url)?.url ?? url], now) > 0) marked++;
           else console.error(`watcher: no item with URL ${url} (URLs must be canonical, as shown by 'watcher list --all')`);
         }
         console.log(`${marked} item(s) marked seen`);

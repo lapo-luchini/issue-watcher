@@ -52,10 +52,12 @@ test("seen --all marks every item", () => {
   expect(seenAt()).not.toBeNull();
 });
 
-test("seen URL marks that item; an unknown URL gets a hint", () => {
+test("seen URL marks that item, also from a browser-copied URL; an unknown URL gets a hint", () => {
   expect(watcher("seen", PR)).toMatchObject({ code: 0, out: "1 item(s) marked seen\n" });
-  const r = watcher("seen", `${PR}/files`);
+  expect(watcher("seen", `${PR}/files#diff-1`)).toMatchObject({ code: 0, out: "1 item(s) marked seen\n" });
+  const r = watcher("seen", "https://github.com/foo/bar/pull/43");
+  expect(r.code).toBe(1);
   expect(r.out).toContain("0 item(s) marked seen");
-  expect(r.err).toContain(`no item with URL ${PR}/files`);
+  expect(r.err).toContain("no item with URL https://github.com/foo/bar/pull/43");
   expect(r.err).toContain("canonical");
 });
