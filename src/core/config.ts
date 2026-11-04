@@ -11,7 +11,9 @@ export interface InstanceConfig {
   type: InstanceType;
   url: string; // API base URL, no trailing slash
   user: string; // login (or email for Bugzilla)
-  emails?: string[]; // my commit emails, to recognize my commits when the forge does not link them to `user`
+  // My commit emails, to recognize my commits when the forge does not link them to `user`:
+  // the instance's own `emails` list if it has one, else the top-level `emails` list, else [].
+  emails: string[];
   token?: string; // resolved from the env variable named by token_env
   disabledReason?: string; // set when token_env is configured but the variable is missing
 }
@@ -27,10 +29,20 @@ export const DEFAULT_FILTER: FilterConfig = {
   botAllowlist: [],
 };
 
+/** Validates an optional `emails` key from the YAML; undefined when it is absent. */
+function emailList(value: unknown, where: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((e) => typeof e === "string" && e !== "")) {
+    throw new Error(`${where}: 'emails' must be a list of strings`);
+  }
+  return value;
+}
+
 export function parseConfig(text: string, env: Record<string, string | undefined>): Config {
   // `any` here: this is untrusted YAML and every field is validated below.
   const raw: any = parse(text) ?? {};
   if (!Array.isArray(raw.instances)) throw new Error("config: 'instances' must be a list");
+  const defaultEmails = emailList(raw.emails, "config") ?? [];
   const seen = new Set<string>();
   const instances = raw.instances.map((r: any, i: number): InstanceConfig => {
     const where = `config: instances[${i}]`;
@@ -40,13 +52,10 @@ export function parseConfig(text: string, env: Record<string, string | undefined
     if (!INSTANCE_TYPES.includes(r.type)) throw new Error(`${where}: unknown type '${r.type}'`);
     if (seen.has(r.id)) throw new Error(`${where}: duplicate id '${r.id}'`);
     seen.add(r.id);
-    const inst: InstanceConfig = { id: r.id, type: r.type, url: r.url.replace(/\/+$/, ""), user: r.user };
-    if (r.emails !== undefined) {
-      if (!Array.isArray(r.emails) || !r.emails.every((e: unknown) => typeof e === "string" && e !== "")) {
-        throw new Error(`${where}: 'emails' must be a list of strings`);
-      }
-      inst.emails = r.emails;
-    }
+    const inst: InstanceConfig = {
+      id: r.id, type: r.type, url: r.url.replace(/\/+$/, ""), user: r.user,
+      emails: emailList(r.emails, where) ?? defaultEmails,
+    };
     if (r.token_env) {
       const token = env[r.token_env];
       if (token) inst.token = token;

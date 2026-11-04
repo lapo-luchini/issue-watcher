@@ -5,7 +5,7 @@ import type { InstanceConfig } from "../src/core/config.ts";
 import type { HttpDeps } from "../src/core/http.ts";
 
 const API = "https://api.github.com";
-const inst = { id: "github", type: "github" as const, url: API, user: "lapo", token: "t" };
+const inst = { id: "github", type: "github" as const, url: API, user: "lapo", emails: [] as string[], token: "t" };
 
 /** Fake GitHub: maps "path?query" (without the API base) to a JSON body or a status code. */
 function fakeGitHub(routes: Record<string, unknown>, extra: Partial<InstanceConfig> = {}) {

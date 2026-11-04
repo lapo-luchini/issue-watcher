@@ -19,7 +19,7 @@ filter:
 
 test("parses instances, strips trailing slash, resolves tokens", () => {
   const cfg = parseConfig(yaml, { GITHUB_TOKEN: "dummy" });
-  expect(cfg.instances[0]).toEqual({ id: "github", type: "github", url: "https://api.github.com", user: "lapo", token: "dummy" });
+  expect(cfg.instances[0]).toEqual({ id: "github", type: "github", url: "https://api.github.com", user: "lapo", emails: [], token: "dummy" });
 });
 
 test("missing token disables the instance instead of failing", () => {
@@ -41,12 +41,21 @@ test("validation errors", () => {
   expect(() => parseConfig(dup, {})).toThrow("duplicate id 'a'");
   expect(() => parseConfig("instances: []\nfilter:\n  noise_patterns: ['(']", {})).toThrow("invalid noise pattern");
   expect(() => parseConfig("instances:\n  - {id: a, type: github, url: x, user: u, emails: me@x.org}", {}))
-    .toThrow("'emails' must be a list of strings");
+    .toThrow("config: instances[0]: 'emails' must be a list of strings");
   expect(() => parseConfig("instances:\n  - {id: a, type: github, url: x, user: u, emails: [3]}", {}))
-    .toThrow("'emails' must be a list of strings");
+    .toThrow("config: instances[0]: 'emails' must be a list of strings");
+  expect(() => parseConfig("emails: me@x.org\ninstances: []", {})).toThrow("config: 'emails' must be a list of strings");
+  expect(() => parseConfig("emails: ['']\ninstances: []", {})).toThrow("config: 'emails' must be a list of strings");
 });
 
-test("optional commit emails per instance", () => {
-  const cfg = parseConfig("instances:\n  - {id: a, type: github, url: x, user: u, emails: [me@x.org, Me@Work.example]}", {});
-  expect(cfg.instances[0]?.emails).toEqual(["me@x.org", "Me@Work.example"]);
+test("commit emails: top-level list for all instances, per-instance list replaces it", () => {
+  const cfg = parseConfig(`
+emails: [me@x.org, Me@Home.example]
+instances:
+  - {id: a, type: github, url: x, user: u}
+  - {id: b, type: gitlab, url: y, user: u, emails: [me@work.example]}
+  - {id: c, type: forgejo, url: z, user: u, emails: []}
+`, {});
+  expect(cfg.instances.map((i) => i.emails)).toEqual([["me@x.org", "Me@Home.example"], ["me@work.example"], []]);
+  expect(parseConfig("instances:\n  - {id: a, type: github, url: x, user: u}", {}).instances[0]?.emails).toEqual([]);
 });

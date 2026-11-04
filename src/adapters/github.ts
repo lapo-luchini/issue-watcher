@@ -48,7 +48,7 @@ export class GitHubAdapter implements Adapter {
   constructor(private readonly inst: InstanceConfig, private readonly http: HttpDeps = defaultHttp) {
     this.web = inst.url === "https://api.github.com" ? "https://github.com" : inst.url.replace(/\/api\/v3$/, "");
     this.me = inst.user.toLowerCase();
-    this.emails = new Set((inst.emails ?? []).map((e) => e.toLowerCase()));
+    this.emails = new Set(inst.emails.map((e) => e.toLowerCase()));
   }
 
   private headers(): Record<string, string> {

@@ -1,3 +1,8 @@
+# Optional: your commit emails, so your own pushes are recognized even when an email is
+# not linked to your forge account (compared case-insensitively). Applies to every
+# instance; an instance with its own `emails:` list uses that list instead.
+emails: [you@example.org]
+
 # Instances to poll. Tokens live in .env; token_env names the variable.
 # Only the github type is implemented so far; gitlab, forgejo and bugzilla come next.
 instances:
@@ -6,9 +11,7 @@ instances:
     url: https://api.github.com
     user: your-github-login
     token_env: GITHUB_TOKEN
-    # Optional: your commit emails, so your own pushes are recognized even when an email
-    # is not linked to your GitHub account (compared case-insensitively).
-    # emails: [you@example.org, you@work.example]
+    # emails: [you@work.example]   # replaces the top-level list for this instance
 
 # Optional filter tuning (these are the defaults).
 filter:

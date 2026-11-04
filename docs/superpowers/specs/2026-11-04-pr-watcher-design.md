@@ -148,13 +148,16 @@ discovery reports them or on first sight.
 ### `data/config.yaml` (in git)
 
 ```yaml
+# Optional: my commit emails, to recognize my commits not linked to `user`.
+emails: [lapo@example.org]
+
 instances:
   - id: github
     type: github
     url: https://api.github.com
     user: lapo
     token_env: GITHUB_TOKEN
-    emails: [lapo@example.org]  # optional: my commit emails, for commits not linked to `user`
+    # emails: [lapo@work.example]  # optional: replaces the top-level list for this instance
   - id: freebsd-bz
     type: bugzilla
     url: https://bugs.freebsd.org/bugzilla
