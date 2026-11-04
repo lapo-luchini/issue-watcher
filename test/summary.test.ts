@@ -5,7 +5,7 @@ test("summaries", () => {
   expect(summarize({ kind: "comment", actor: "bob", excerpt: "Looks  good\nbut please\trebase", details: null }))
     .toBe("comment by @bob: Looks good but please rebase");
   expect(summarize({ kind: "review", actor: "m", excerpt: "", details: { state: "changes_requested" } }))
-    .toBe("review (changes_requested) by @m");
+    .toBe("review (changes requested) by @m");
   expect(summarize({ kind: "state", actor: "m", excerpt: null, details: { to: "merged" } })).toBe("→ merged by @m");
   expect(summarize({ kind: "label", actor: "m", excerpt: null, details: { action: "removed", label: "wip" } }))
     .toBe("label -wip by @m");

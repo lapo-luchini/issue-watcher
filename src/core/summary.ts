@@ -11,7 +11,7 @@ export function summarize(e: Pick<EventRow, "kind" | "actor" | "excerpt" | "deta
     case "comment":
       return `comment${by}: ${oneLine(e.excerpt)}`;
     case "review":
-      return `review (${d.state ?? "?"})${by}` + (e.excerpt ? `: ${oneLine(e.excerpt)}` : "");
+      return `review (${String(d.state ?? "?").replaceAll("_", " ")})${by}` + (e.excerpt ? `: ${oneLine(e.excerpt)}` : "");
     case "state":
       return `→ ${d.to}${by}`;
     case "label":

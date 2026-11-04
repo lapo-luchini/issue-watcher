@@ -80,6 +80,7 @@ export interface EventView {
   at: string;
   detectedAt: string;
   summary: string;
+  details: Record<string, unknown> | null;
   excerpt: string | null;
   isSignal: boolean;
   reason: string;
@@ -90,7 +91,7 @@ export interface EventView {
 export function itemEvents(store: Store, url: string, includeNoise: boolean): EventView[] {
   return store.eventsFor(url, includeNoise).map((e) => ({
     key: e.key, kind: e.kind, actor: e.actor, actorRole: e.actorRole, at: e.at, detectedAt: e.detectedAt,
-    summary: summarize(e), excerpt: e.excerpt, isSignal: e.isSignal, reason: e.reason, isBaseline: e.isBaseline,
+    summary: summarize(e), details: e.details, excerpt: e.excerpt, isSignal: e.isSignal, reason: e.reason, isBaseline: e.isBaseline,
   }));
 }
 
