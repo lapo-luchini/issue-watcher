@@ -123,11 +123,13 @@ export class GitHubAdapter implements Adapter {
     const events = timeline.flatMap((e) => this.mapTimeline(e));
     let state: ItemState = issue.state === "open" ? "open" : "closed";
     let ciState: CiState | null = null;
-    let hasConflicts = false;
+    let hasConflicts: boolean | null = false;
     if (ref.kind === "pr") {
       const pr = await this.get<GhPull>(`${base}/pulls/${num}`);
       if (pr.merged) state = "merged";
-      hasConflicts = pr.mergeable_state === "dirty";
+      // "unknown" (or missing) while GitHub recomputes mergeability in the background.
+      const ms = pr.mergeable_state;
+      hasConflicts = ms === undefined || ms === "unknown" ? null : ms === "dirty";
       const commits = await this.all<GhCommit>(`${base}/pulls/${num}/commits?per_page=100`);
       for (const c of commits) events.push(this.mapCommit(c));
       ciState = await this.ciState(base, pr.head.sha);

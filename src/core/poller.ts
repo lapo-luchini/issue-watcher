@@ -114,7 +114,7 @@ async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promi
 }
 
 /** Synthesizes events the forge does not report as such: CI result changes and new merge conflicts. */
-function derivedEvents(prev: ItemRow | null, snap: Snapshot, ci: ItemRow["ciState"], now: Date): NormalizedEvent[] {
+function derivedEvents(prev: ItemRow | null, ci: ItemRow["ciState"], conflicts: boolean, now: Date): NormalizedEvent[] {
   if (!prev) return [];
   const out: NormalizedEvent[] = [];
   const stamp = now.toISOString();
@@ -122,7 +122,7 @@ function derivedEvents(prev: ItemRow | null, snap: Snapshot, ci: ItemRow["ciStat
   if (ci && ci !== prev.ciState && !(prev.ciState === null && ci === "success")) {
     out.push({ key: `ci:${stamp}`, kind: "ci", actor: "", actorRole: "unknown", at: now, details: { from: prev.ciState, to: ci } });
   }
-  if (snap.hasConflicts && !prev.hasConflicts) {
+  if (conflicts && !prev.hasConflicts) {
     out.push({ key: `conflict:${stamp}`, kind: "conflict", actor: "", actorRole: "unknown", at: now });
   }
   return out;
@@ -145,11 +145,13 @@ export function applySnapshot(
   const priority = effectivePriority(intent.get(url), snap.ref.kind, snap.authoredByMe);
   // CI: remember the last settled result; "pending" does not overwrite it.
   const ci = snap.ciState === "pending" ? (prev?.ciState ?? null) : (snap.ciState ?? null);
+  // Conflicts: unknown (null/undefined) keeps the previous value.
+  const conflicts = snap.hasConflicts ?? prev?.hasConflicts ?? false;
 
   let latestSignal: EventRow | null = null;
   let latestOwnAt: string | null = null;
   let newSignals = 0;
-  for (const ev of [...snap.events, ...derivedEvents(prev, snap, ci, now)]) {
+  for (const ev of [...snap.events, ...derivedEvents(prev, ci, conflicts, now)]) {
     const verdict = classify(ev, priority, config.filter);
     const row: EventRow = {
       itemUrl: url, key: ev.key, kind: ev.kind, actor: ev.actor, actorRole: ev.actorRole,
@@ -182,7 +184,7 @@ export function applySnapshot(
   store.upsertItem({
     url, id: itemId(url), instance: snap.ref.instance, kind: snap.ref.kind, repo: snap.repo,
     title: snap.title, state: snap.state, stateDetail: snap.stateDetail ?? null, ciState: ci,
-    hasConflicts: snap.hasConflicts ?? false, authoredByMe: snap.authoredByMe, labels: snap.labels,
+    hasConflicts: conflicts, authoredByMe: snap.authoredByMe, labels: snap.labels,
     lastSignalAt, lastSignalSummary, seenAt, baselineAt: prev?.baselineAt ?? nowIso,
     fetchedAt: nowIso, snapshotJson: JSON.stringify(meta),
   });

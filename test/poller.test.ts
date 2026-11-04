@@ -97,6 +97,15 @@ test("my own reply after the latest signal marks the item seen", () => {
   expect(unread(PR)).toBe(true);
 });
 
+test("unknown mergeability keeps the previous conflict state", () => {
+  applySnapshot(snapshot(PR, []), ctx, T0, null);
+  expect(applySnapshot(snapshot(PR, [], { hasConflicts: true }), ctx, minutes(5), null)).toBe(1);
+  expect(applySnapshot(snapshot(PR, [], { hasConflicts: null }), ctx, minutes(10), null)).toBe(0);
+  expect(store.getItem(PR)?.hasConflicts).toBe(true);
+  expect(applySnapshot(snapshot(PR, [], { hasConflicts: true }), ctx, minutes(15), null)).toBe(0);
+  expect(store.eventsFor(PR).filter((e) => e.kind === "conflict")).toHaveLength(1);
+});
+
 test("CI changes and conflicts are derived; pending keeps the last settled state", () => {
   applySnapshot(snapshot(PR, [], { ciState: "success" }), ctx, T0, null);
   expect(applySnapshot(snapshot(PR, [], { ciState: "pending" }), ctx, minutes(5), null)).toBe(0);

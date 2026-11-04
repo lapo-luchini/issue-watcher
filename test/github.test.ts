@@ -85,6 +85,16 @@ test("fetch normalizes a merged PR", async () => {
   expect(byKey["commit:abc123def4567890"]).toMatchObject({ kind: "push", actorRole: "me", details: { sha: "abc123def456", message: "Fix build" } });
 });
 
+test("mergeable_state maps to hasConflicts, with unknown as null", async () => {
+  for (const [state, expected] of [["dirty", true], ["clean", false], ["unknown", null], [undefined, null]] as const) {
+    const { adapter } = fakeGitHub({
+      ...prRoutes,
+      "/repos/foo/bar/pulls/42": { merged: false, mergeable_state: state, head: { sha: "abc123" } },
+    });
+    expect((await adapter.fetch({ url: PR, instance: "github", kind: "pr" })).hasConflicts).toBe(expected);
+  }
+});
+
 test("own commits are recognized by committer login or configured email", async () => {
   const commit = (sha: string, author: unknown, committer: unknown, authorEmail: string, committerEmail: string) => ({
     sha, author, committer,

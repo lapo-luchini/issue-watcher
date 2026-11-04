@@ -106,7 +106,7 @@ interface Snapshot {
   state: string;           // normalized: open | merged | closed | gone, plus forge detail
   stateDetail?: string;    // e.g. Bugzilla "In Progress", "Closed/FIXED"
   ciState?: "success" | "failure" | "pending" | null;
-  hasConflicts?: boolean;
+  hasConflicts?: boolean | null; // null: unknown (forge still computing it)
   authoredByMe: boolean;
   labels: string[];
   events: NormalizedEvent[];
@@ -218,6 +218,8 @@ Rules:
 - **Own activity**: my own event newer than the latest new signal sets `seen_at`.
 - **CI**: `ci_state` keeps the last *settled* result (`pending` does not overwrite it); a
   first green result is not signal, a first red one or any later change is.
+- **Conflicts**: an unknown mergeability (GitHub's `mergeable_state: "unknown"` while it
+  recomputes) keeps the previous stored value, so a conflict is signalled only once.
 - **Cursor**: per instance; the next query uses `cursor − 5 min` overlap; dedup by
   `event_key` absorbs the overlap.
 

@@ -35,7 +35,7 @@ export interface Snapshot {
   state: ItemState;
   stateDetail?: string;
   ciState?: CiState | null;
-  hasConflicts?: boolean;
+  hasConflicts?: boolean | null; // null: unknown (e.g. the forge is still computing it)
   authoredByMe: boolean;
   labels: string[];
   events: NormalizedEvent[];
