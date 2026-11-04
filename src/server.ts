@@ -1,0 +1,222 @@
+// HTTP front end: the JSON API of spec section 6 plus the web UI (web/index.html, bundled by Bun
+// on the fly). A thin layer over core/api.ts; the server never touches the store directly.
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import index from "../web/index.html";
+import { canonicalIntentFor, createAdapter, urlRecognizer } from "./adapters/index.ts";
+import {
+  addItem, changeIntent, getItem, instanceStatus, itemEvents, listItems, markSeen, type ListOptions,
+} from "./core/api.ts";
+import { loadConfig, type InstanceConfig } from "./core/config.ts";
+import { loadIntent, type IntentChange } from "./core/intent.ts";
+import type { Adapter, Priority } from "./core/model.ts";
+import { pollAll, type InstanceResult } from "./core/poller.ts";
+import { Store } from "./core/store.ts";
+
+export interface ServerOptions {
+  home: string; // the watcher's directory: data/config.yaml, data/items.yaml, var/cache.sqlite
+  port?: number; // 0: any free port
+  hostname?: string; // default 127.0.0.1
+  adapterFor?: (inst: InstanceConfig) => Adapter; // tests replace the real forges
+  now?: () => Date;
+}
+
+/** The latest "Poll now" started from the web UI. */
+interface PollReport {
+  startedAt: string;
+  finishedAt: string | null;
+  results: InstanceResult[] | null;
+  error: string | null;
+}
+
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+class HttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+const json = (body: unknown, status = 200) => Response.json(body, { status });
+
+export async function startServer(opts: ServerOptions) {
+  const now = opts.now ?? (() => new Date());
+  const config = await loadConfig(join(opts.home, "data/config.yaml"));
+  const recognize = urlRecognizer(config);
+  const canonical = (url: string) => recognize(url)?.url ?? url;
+  mkdirSync(join(opts.home, "var"), { recursive: true });
+  const store = new Store(join(opts.home, "var/cache.sqlite"));
+  const hostname = opts.hostname ?? "127.0.0.1";
+  let polling: Promise<void> | null = null;
+  let lastPoll: PollReport | null = null;
+
+  /** items.yaml is read on every request, so hand edits and `git pull`s show up without a restart. */
+  async function intent() {
+    return canonicalIntentFor(config, await loadIntent(join(opts.home, "data/items.yaml"))).intent;
+  }
+
+  /**
+   * Guards every request. Bound to loopback, the Host header must be a loopback name: a page on
+   * another site could otherwise point its own DNS name at 127.0.0.1 and read the API (DNS
+   * rebinding). Changes must be JSON and, when the browser says where they come from, from this
+   * page's origin: a plain cross-site form post cannot do either (CSRF).
+   */
+  function guard(req: Request): void {
+    const url = new URL(req.url);
+    const host = req.headers.get("host") ?? url.host;
+    if (LOOPBACK.has(hostname) || hostname === "::1") {
+      const name = host.replace(/:\d+$/, "");
+      if (!LOOPBACK.has(name)) throw new HttpError(403, `unexpected Host '${host}'`);
+    }
+    if (req.method === "GET" || req.method === "HEAD") return;
+    if (!(req.headers.get("content-type") ?? "").startsWith("application/json")) {
+      throw new HttpError(415, "send JSON (Content-Type: application/json)");
+    }
+    // Compare hosts only: behind a TLS-terminating proxy the page is https while we see http.
+    const origin = req.headers.get("origin");
+    if (origin && (!URL.canParse(origin) || new URL(origin).host !== host)) {
+      throw new HttpError(403, `cross-origin request from ${origin}`);
+    }
+  }
+
+  /** Wraps a handler: guard, JSON errors. */
+  function route(handler: (req: Request & { params: Record<string, string> }) => Promise<Response> | Response) {
+    return async (req: Request & { params: Record<string, string> }) => {
+      try {
+        guard(req);
+        return await handler(req);
+      } catch (err) {
+        if (err instanceof HttpError) return json({ error: err.message }, err.status);
+        return json({ error: (err as Error).message }, 500);
+      }
+    };
+  }
+
+  async function body(req: Request): Promise<Record<string, unknown>> {
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b !== "object" || Array.isArray(b)) throw new HttpError(400, "the body must be a JSON object");
+    return b as Record<string, unknown>;
+  }
+
+  async function itemOr404(id: string) {
+    const item = getItem(store, await intent(), id);
+    if (!item) throw new HttpError(404, `no item ${id}`);
+    return item;
+  }
+
+  function parseChange(b: Record<string, unknown>): IntentChange {
+    const change: IntentChange = {};
+    for (const key of Object.keys(b)) {
+      if (!["priority", "muted", "note"].includes(key)) throw new HttpError(400, `unknown field '${key}'`);
+    }
+    if ("priority" in b) {
+      if (b.priority !== null && b.priority !== "important" && b.priority !== "normal") {
+        throw new HttpError(400, "priority must be 'important', 'normal' or null");
+      }
+      change.priority = b.priority as Priority | null;
+    }
+    if ("muted" in b) {
+      if (typeof b.muted !== "boolean") throw new HttpError(400, "muted must be true or false");
+      change.muted = b.muted;
+    }
+    if ("note" in b) {
+      if (b.note !== null && typeof b.note !== "string") throw new HttpError(400, "note must be text or null");
+      change.note = b.note as string | null;
+    }
+    if (Object.keys(change).length === 0) throw new HttpError(400, "nothing to change");
+    return change;
+  }
+
+  function startPoll(): void {
+    lastPoll = { startedAt: now().toISOString(), finishedAt: null, results: null, error: null };
+    const report = lastPoll;
+    polling = (async () => {
+      try {
+        report.results = await pollAll({ store, config, intent: await intent(), adapterFor: opts.adapterFor ?? createAdapter, now });
+      } catch (err) {
+        report.error = (err as Error).message;
+      } finally {
+        report.finishedAt = now().toISOString();
+        polling = null;
+      }
+    })();
+  }
+
+  const server = Bun.serve({
+    port: opts.port ?? 8411,
+    hostname,
+    development: process.env.NODE_ENV !== "production",
+    routes: {
+      "/": index,
+      "/api/items": {
+        GET: route(async (req) => {
+          const q = new URL(req.url).searchParams;
+          const on = (k: string) => q.get(k) === "1" || q.get(k) === "true";
+          const o: ListOptions = { unreadOnly: on("unread"), importantOnly: on("important"), includeMuted: on("muted") };
+          if (q.get("instance")) o.instance = q.get("instance")!;
+          return json({ items: listItems(store, await intent(), o) });
+        }),
+        POST: route(async (req) => {
+          const b = await body(req);
+          if (typeof b.url !== "string") throw new HttpError(400, "url is required");
+          if (b.title !== undefined && typeof b.title !== "string") throw new HttpError(400, "title must be text");
+          try {
+            const r = await addItem(opts.home, store, await intent(), recognize, b.url.trim(), b.title as string | undefined);
+            return json({ url: r.url, manual: r.manual, warning: r.commit.warning ?? null }, 201);
+          } catch (err) {
+            throw new HttpError(400, (err as Error).message);
+          }
+        }),
+      },
+      "/api/items/:id": {
+        GET: route(async (req) => json({ item: await itemOr404(req.params.id!) })),
+        PATCH: route(async (req) => {
+          const item = await itemOr404(req.params.id!);
+          const r = await changeIntent(opts.home, item.url, parseChange(await body(req)), canonical, item.instance ? item.repo : undefined);
+          return json({ item: await itemOr404(item.id), warning: r.warning ?? null });
+        }),
+      },
+      "/api/items/:id/events": {
+        GET: route(async (req) => {
+          const item = await itemOr404(req.params.id!);
+          const noise = new URL(req.url).searchParams.get("noise") === "1";
+          return json({ events: itemEvents(store, item.url, noise) });
+        }),
+      },
+      "/api/items/:id/seen": {
+        POST: route(async (req) => {
+          const item = await itemOr404(req.params.id!);
+          return json({ marked: markSeen(store, [item.url], now()) });
+        }),
+      },
+      "/api/seen": { POST: route(() => json({ marked: markSeen(store, [], now()) })) },
+      "/api/poll": {
+        POST: route(() => {
+          // Also refused while cron's poll holds the lock.
+          if (polling || store.lockHeld("poll", now())) throw new HttpError(409, "a poll is already running");
+          startPoll();
+          return json({ started: true }, 202);
+        }),
+      },
+      "/api/status": {
+        GET: route(() => json({ instances: instanceStatus(store, config), polling: polling !== null, lastPoll })),
+      },
+      "/api/*": route(() => {
+        throw new HttpError(404, "no such API endpoint");
+      }),
+    },
+    fetch: () => new Response("not found", { status: 404 }),
+  });
+
+  return {
+    server,
+    url: server.url.href,
+    /** Waits for a running poll (tests); resolves at once when none runs. */
+    idle: () => polling ?? Promise.resolve(),
+    stop: async () => {
+      await (polling ?? Promise.resolve());
+      server.stop(true);
+      store.close();
+    },
+  };
+}
