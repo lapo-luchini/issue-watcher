@@ -59,3 +59,11 @@ instances:
   expect(cfg.instances.map((i) => i.emails)).toEqual([["me@x.org", "Me@Home.example"], ["me@work.example"], []]);
   expect(parseConfig("instances:\n  - {id: a, type: github, url: x, user: u}", {}).instances[0]?.emails).toEqual([]);
 });
+
+test("maintainer_domains: optional, lowercased, leading @ dropped", () => {
+  const cfg = parseConfig("instances:\n  - {id: a, type: bugzilla, url: x, user: u, maintainer_domains: [FreeBSD.org, '@kde.org']}", {});
+  expect(cfg.instances[0]?.maintainerDomains).toEqual(["freebsd.org", "kde.org"]);
+  expect(parseConfig("instances:\n  - {id: a, type: bugzilla, url: x, user: u}", {}).instances[0]?.maintainerDomains).toBeUndefined();
+  expect(() => parseConfig("instances:\n  - {id: a, type: bugzilla, url: x, user: u, maintainer_domains: x.org}", {}))
+    .toThrow("config: instances[0]: 'maintainer_domains' must be a list of strings");
+});
