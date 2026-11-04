@@ -80,15 +80,22 @@ instances:
     web: "https://app.radicle.xyz/nodes/seed.radicle.garden",
   });
   expect(cfg.instances[1]).toEqual({ id: "mine", type: "radicle", url: "http://localhost:8080/api/v1", user: "did:key:z6MkLaptop", emails: [] });
-  expect(() => parseConfig("instances:\n  - {id: a, type: radicle, url: x, user: u, repos: [z3gq]}", {}))
+  expect(() => parseConfig("instances:\n  - {id: a, type: radicle, url: x, user: did:key:z6MkA, repos: [z3gq]}", {}))
     .toThrow("config: instances[0]: 'z3gq' is not a Radicle repo id (rad:z…)");
-  expect(() => parseConfig("instances:\n  - {id: a, type: radicle, url: x, user: u, web: 'not a url'}", {}))
-    .toThrow("config: instances[0]: 'web' must be a URL");
+  expect(() => parseConfig("instances:\n  - {id: a, type: radicle, url: x, user: did:key:z6MkA, web: 'not a url'}", {}))
+    .toThrow("config: instances[0]: 'web' must be an http(s) URL");
   expect(() => parseConfig("instances:\n  - {id: a, type: radicle, url: x, user: []}", {}))
     .toThrow("config: instances[0]: 'user' is required (one identity or a list)");
   // Only Radicle accepts a list.
   expect(() => parseConfig("instances:\n  - {id: a, type: github, url: x, user: [a, b]}", {}))
     .toThrow("config: instances[0]: 'user' is required");
+  // Mistakes that would otherwise silently watch nothing.
+  const bad = (inst: string) => () => parseConfig(`instances:\n  - {id: a, type: radicle, url: x, ${inst}}`, {});
+  expect(bad("user: did:key:z6MkA, repos: []")).toThrow("'repos' is empty: leave it out to watch every repo the node seeds");
+  expect(bad("user: lapo")).toThrow("'lapo' is not a Radicle identity (did:key:z6Mk… or z6Mk…)");
+  expect(bad("user: did:key:z6MkA, web: 'foo:bar'")).toThrow("'web' must be an http(s) URL");
+  expect(() => parseConfig("instances:\n  - {id: a, type: github, url: x, user: u, repos: [rad:z3gq]}", {}))
+    .toThrow("config: instances[0]: 'repos' and 'web' are for radicle instances only");
 });
 
 test("maintainer_domains: optional, lowercased, leading @ dropped", () => {

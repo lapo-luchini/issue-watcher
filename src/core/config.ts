@@ -73,14 +73,24 @@ export function parseConfig(text: string, env: Record<string, string | undefined
     if (users.length > 1) inst.users = users;
     const domains = stringList(r.maintainer_domains, where, "maintainer_domains");
     if (domains) inst.maintainerDomains = domains.map((d) => d.toLowerCase().replace(/^@/, ""));
+    if (r.type !== "radicle" && (r.repos !== undefined || r.web !== undefined)) {
+      throw new Error(`${where}: 'repos' and 'web' are for radicle instances only`);
+    }
+    if (r.type === "radicle") {
+      const bad = users.find((u) => !/^(did:key:)?z6Mk[1-9A-HJ-NP-Za-km-z]+$/.test(u));
+      if (bad) throw new Error(`${where}: '${bad}' is not a Radicle identity (did:key:z6Mk… or z6Mk…)`);
+    }
     const repos = stringList(r.repos, where, "repos");
     if (repos) {
+      if (repos.length === 0) throw new Error(`${where}: 'repos' is empty: leave it out to watch every repo the node seeds`);
       const bad = repos.find((x) => !/^rad:z[1-9A-HJ-NP-Za-km-z]+$/.test(x));
       if (bad) throw new Error(`${where}: '${bad}' is not a Radicle repo id (rad:z…)`);
       inst.repos = repos;
     }
     if (r.web !== undefined) {
-      if (typeof r.web !== "string" || !URL.canParse(r.web)) throw new Error(`${where}: 'web' must be a URL`);
+      if (typeof r.web !== "string" || !URL.canParse(r.web) || !/^https?:$/.test(new URL(r.web).protocol)) {
+        throw new Error(`${where}: 'web' must be an http(s) URL`);
+      }
       inst.web = r.web.replace(/\/+$/, "");
     }
     if (r.token_env) {
