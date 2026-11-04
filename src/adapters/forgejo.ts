@@ -150,13 +150,15 @@ export class ForgejoAdapter implements Adapter {
 
   /** Web URLs of known items updated since the cursor: one listing per repo (issues and PRs alike). */
   private async updatedKnown(since: Date, known: ItemRef[]): Promise<string[]> {
-    const byRepo = new Map<string, Set<string>>(); // "owner/repo" -> canonical URLs
+    // Owner and repo names are case-insensitive, and a URL added by hand may not use the
+    // forge's spelling: match on lowercase, but report the URL as it is known (the cache key).
+    const byRepo = new Map<string, Map<string, string>>(); // "owner/repo" -> lowercase URL -> known URL
     for (const ref of known) {
       if (!this.refFromUrl(ref.url)) continue; // cached under an old instance url
       const [owner, repo] = new URL(ref.url).pathname.slice(this.webPrefix.length + 1).split("/");
-      const key = `${owner}/${repo}`;
-      if (!byRepo.has(key)) byRepo.set(key, new Set());
-      byRepo.get(key)!.add(ref.url);
+      const key = `${owner}/${repo}`.toLowerCase();
+      if (!byRepo.has(key)) byRepo.set(key, new Map());
+      byRepo.get(key)!.set(ref.url.toLowerCase(), ref.url);
     }
     const urls: string[] = [];
     for (const [repo, wanted] of byRepo) {
@@ -165,7 +167,8 @@ export class ForgejoAdapter implements Adapter {
         `/repos/${repo}/issues?state=all&since=${encodeURIComponent(since.toISOString())}&limit=50`));
       for (const i of found ?? []) {
         const ref = this.refFromUrl(i.html_url);
-        if (ref && wanted.has(ref.url)) urls.push(ref.url);
+        const knownUrl = ref ? wanted.get(ref.url.toLowerCase()) : undefined;
+        if (knownUrl) urls.push(knownUrl);
       }
     }
     return urls;

@@ -289,6 +289,8 @@ test("discover: without notifications, known items are checked per repo instead"
     prRef, // also found by a search: not checked again
     { url: "https://codeberg.org/foo/bar/issues/7", instance: "codeberg", kind: "issue" as const },
     { url: "https://codeberg.org/foo/bar/issues/8", instance: "codeberg", kind: "issue" as const },
+    // Added by hand with a different case: still matched, and reported under its known URL.
+    { url: "https://codeberg.org/Foo/Bar/issues/9", instance: "codeberg", kind: "issue" as const },
     { url: "https://codeberg.org/gone/repo/issues/1", instance: "codeberg", kind: "issue" as const },
   ];
   const { adapter, calls } = fake({
@@ -298,10 +300,13 @@ test("discover: without notifications, known items are checked per repo instead"
     [`/repos/foo/bar/issues?state=all&since=${iso}&limit=50`]: [
       { html_url: "https://codeberg.org/foo/bar/issues/7" }, // known and updated
       { html_url: "https://codeberg.org/foo/bar/pulls/99" }, // updated, but not mine
+      { html_url: "https://codeberg.org/foo/bar/issues/9" },
     ],
     [`/repos/gone/repo/issues?state=all&since=${iso}&limit=50`]: 404,
   });
-  expect((await adapter.discover(since, known)).map((r) => r.url)).toEqual([PR, "https://codeberg.org/foo/bar/issues/7"]);
+  expect((await adapter.discover(since, known)).map((r) => r.url)).toEqual([
+    PR, "https://codeberg.org/foo/bar/issues/7", "https://codeberg.org/Foo/Bar/issues/9",
+  ]);
   expect(calls.filter((c) => c.includes("/issues?state=all"))).toHaveLength(2); // one per repo
 });
 
