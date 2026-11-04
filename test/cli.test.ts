@@ -16,7 +16,7 @@ beforeEach(() => {
   const store = new Store(join(home, "var/cache.sqlite"));
   store.upsertItem({
     url: PR, id: itemId(PR), instance: "github", kind: "pr", repo: "foo/bar", title: "Fix build",
-    state: "open", stateDetail: null, ciState: null, hasConflicts: false, authoredByMe: true, labels: [],
+    state: "open", stateDetail: null, ciState: null, hasConflicts: false, authoredByMe: true, maintainedByMe: false, labels: [],
     lastSignalAt: "2026-11-04T10:00:00.000Z", lastSignalSummary: "comment by @maint: LGTM", seenAt: null,
     baselineAt: "2026-11-01T00:00:00.000Z", fetchedAt: "2026-11-04T10:00:00.000Z", snapshotJson: null,
   });

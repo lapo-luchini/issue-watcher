@@ -32,7 +32,7 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
     return {
       id: i.id, url: i.url, instance: i.instance, kind: i.kind, repo: i.repo, title: i.title,
       state: i.stateDetail ? `${i.state} (${i.stateDetail})` : i.state, ciState: i.ciState,
-      priority: effectivePriority(entry, i.kind, i.authoredByMe),
+      priority: effectivePriority(entry, i.kind, i.authoredByMe, i.maintainedByMe),
       muted: entry?.muted ?? false, note: entry?.note ?? null,
       unread: i.lastSignalAt !== null && (i.seenAt === null || i.lastSignalAt > i.seenAt),
       lastSignalAt: i.lastSignalAt, lastSignalSummary: i.lastSignalSummary,

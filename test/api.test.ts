@@ -11,7 +11,7 @@ beforeEach(() => {
 function row(url: string, extra: Partial<ItemRow>): ItemRow {
   return {
     url, id: itemId(url), instance: "github", kind: "issue", repo: "foo/bar", title: url.slice(-1),
-    state: "open", stateDetail: null, ciState: null, hasConflicts: false, authoredByMe: false, labels: [],
+    state: "open", stateDetail: null, ciState: null, hasConflicts: false, authoredByMe: false, maintainedByMe: false, labels: [],
     lastSignalAt: null, lastSignalSummary: null, seenAt: null, baselineAt: "2026-11-01T00:00:00.000Z",
     fetchedAt: "2026-11-01T00:00:00.000Z", snapshotJson: null, ...extra,
   };

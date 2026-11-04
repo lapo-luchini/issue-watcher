@@ -67,7 +67,12 @@ export function canonicalizeIntent(
   return { intent: out, unknown };
 }
 
-/** Explicit priority wins; otherwise PRs/MRs I authored are important and everything else is normal. */
-export function effectivePriority(entry: IntentEntry | undefined, kind: ItemKind, authoredByMe: boolean): Priority {
-  return entry?.priority ?? (kind === "pr" && authoredByMe ? "important" : "normal");
+/**
+ * Explicit priority wins; otherwise PRs/MRs/patches I authored, or that were sent to a repo I
+ * maintain, are important, and everything else is normal.
+ */
+export function effectivePriority(
+  entry: IntentEntry | undefined, kind: ItemKind, authoredByMe: boolean, maintainedByMe = false,
+): Priority {
+  return entry?.priority ?? (kind === "pr" && (authoredByMe || maintainedByMe) ? "important" : "normal");
 }

@@ -135,6 +135,14 @@ test("first green CI is not news; CI on a normal-priority item is stored as nois
   expect(store.eventsFor(other, true)[0]?.reason).toBe("low-priority:ci");
 });
 
+test("a patch on a repo I maintain is important by default, and the flag is stored", () => {
+  const incoming = "https://github.com/me/mine/pull/3";
+  applySnapshot(snapshot(incoming, [], { authoredByMe: false, maintainedByMe: true, ciState: "success" }), ctx, T0, null);
+  expect(store.getItem(incoming)?.maintainedByMe).toBe(true);
+  expect(applySnapshot(snapshot(incoming, [], { authoredByMe: false, maintainedByMe: true, ciState: "failure" }), ctx, minutes(5), null)).toBe(1);
+  expect(store.eventsFor(incoming)[0]?.reason).toBe("signal:ci");
+});
+
 test("pollAll: discovery, intent-only items, cursor and overlap", async () => {
   adapter.discovered = [{ url: PR, instance: "github", kind: "pr" }];
   adapter.snapshots.set(PR, snapshot(PR, []));

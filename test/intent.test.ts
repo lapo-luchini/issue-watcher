@@ -42,6 +42,9 @@ test("effectivePriority defaults", () => {
   expect(effectivePriority(undefined, "pr", true)).toBe("important");
   expect(effectivePriority(undefined, "pr", false)).toBe("normal");
   expect(effectivePriority(undefined, "issue", true)).toBe("normal");
+  // Incoming patches on a repo I maintain matter as much as my own; issues there stay normal.
+  expect(effectivePriority(undefined, "pr", false, true)).toBe("important");
+  expect(effectivePriority(undefined, "issue", false, true)).toBe("normal");
   const flagged = parseIntent("items:\n  - url: https://x.org/a\n    priority: normal").get("https://x.org/a");
   expect(effectivePriority(flagged, "pr", true)).toBe("normal");
 });

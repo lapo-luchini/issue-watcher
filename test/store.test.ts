@@ -15,7 +15,7 @@ beforeEach(() => {
 const url = "https://github.com/foo/bar/pull/42";
 const item: ItemRow = {
   url, id: itemId(url), instance: "github", kind: "pr", repo: "foo/bar", title: "Fix build",
-  state: "open", stateDetail: null, ciState: "success", hasConflicts: false, authoredByMe: true,
+  state: "open", stateDetail: null, ciState: "success", hasConflicts: false, authoredByMe: true, maintainedByMe: false,
   labels: ["bug"], lastSignalAt: null, lastSignalSummary: null, seenAt: null,
   baselineAt: "2026-11-01T00:00:00.000Z", fetchedAt: "2026-11-01T00:00:00.000Z", snapshotJson: null,
 };

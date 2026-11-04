@@ -175,7 +175,8 @@ export function applySnapshot(
   const url = snap.ref.url;
   const prev = store.getItem(url);
   const nowIso = now.toISOString();
-  const priority = effectivePriority(intent.get(url), snap.ref.kind, snap.authoredByMe);
+  const maintainedByMe = snap.maintainedByMe ?? false;
+  const priority = effectivePriority(intent.get(url), snap.ref.kind, snap.authoredByMe, maintainedByMe);
   // CI: remember the last settled result; "pending" and no result at all (e.g. no check
   // runs yet right after a push) do not overwrite it.
   const ci = snap.ciState === "success" || snap.ciState === "failure" ? snap.ciState : (prev?.ciState ?? null);
@@ -218,7 +219,7 @@ export function applySnapshot(
   store.upsertItem({
     url, id: itemId(url), instance: snap.ref.instance, kind: snap.ref.kind, repo: snap.repo,
     title: snap.title, state: snap.state, stateDetail: snap.stateDetail ?? null, ciState: ci,
-    hasConflicts: conflicts, authoredByMe: snap.authoredByMe, labels: snap.labels,
+    hasConflicts: conflicts, authoredByMe: snap.authoredByMe, maintainedByMe, labels: snap.labels,
     lastSignalAt, lastSignalSummary, seenAt, baselineAt: prev?.baselineAt ?? nowIso,
     fetchedAt: nowIso, snapshotJson: JSON.stringify(meta),
   });
@@ -244,7 +245,7 @@ function markGone(ref: ItemRef, ctx: PollContext, now: Date, log: (line: string)
 export function refilter(store: Store, config: Config, intent: Intent): { changed: number } {
   let changed = 0;
   for (const item of store.listItems()) {
-    const priority = effectivePriority(intent.get(item.url), item.kind, item.authoredByMe);
+    const priority = effectivePriority(intent.get(item.url), item.kind, item.authoredByMe, item.maintainedByMe);
     for (const e of store.eventsFor(item.url, true)) {
       const v = classify(
         { key: e.key, kind: e.kind, actor: e.actor, actorRole: e.actorRole, at: new Date(e.at),

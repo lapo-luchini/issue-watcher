@@ -15,6 +15,7 @@ export interface ItemRow {
   ciState: CiState | null;
   hasConflicts: boolean;
   authoredByMe: boolean;
+  maintainedByMe: boolean; // belongs to a repo I maintain: its PRs/patches are important by default
   labels: string[];
   lastSignalAt: string | null; // when we detected the latest signal (local clock)
   lastSignalSummary: string | null;
@@ -94,7 +95,7 @@ function toItem(r: any): ItemRow {
   return {
     url: r.url, id: r.id, instance: r.instance, kind: r.kind, repo: r.repo, title: r.title,
     state: r.state, stateDetail: r.state_detail, ciState: r.ci_state,
-    hasConflicts: r.has_conflicts === 1, authoredByMe: r.authored_by_me === 1,
+    hasConflicts: r.has_conflicts === 1, authoredByMe: r.authored_by_me === 1, maintainedByMe: r.maintained_by_me === 1,
     labels: JSON.parse(r.labels_json), lastSignalAt: r.last_signal_at,
     lastSignalSummary: r.last_signal_summary, seenAt: r.seen_at, baselineAt: r.baseline_at,
     fetchedAt: r.fetched_at, snapshotJson: r.snapshot_json,
@@ -127,6 +128,7 @@ export class Store {
         WHERE detected_at <= (SELECT baseline_at FROM items WHERE items.url = events.item_url)`);
     }
     this.addColumnIfMissing("retry", "first_since", "TEXT");
+    this.addColumnIfMissing("items", "maintained_by_me", "INTEGER NOT NULL DEFAULT 0");
   }
 
   /** Returns true if the column was missing and has been added. */
@@ -156,15 +158,16 @@ export class Store {
   upsertItem(i: ItemRow): void {
     this.db.query(`
       INSERT INTO items (url, id, instance, kind, repo, title, state, state_detail, ci_state,
-        has_conflicts, authored_by_me, labels_json, last_signal_at, last_signal_summary, seen_at,
+        has_conflicts, authored_by_me, maintained_by_me, labels_json, last_signal_at, last_signal_summary, seen_at,
         baseline_at, fetched_at, snapshot_json)
       VALUES ($url, $id, $instance, $kind, $repo, $title, $state, $stateDetail, $ciState,
-        $hasConflicts, $authoredByMe, $labels, $lastSignalAt, $lastSignalSummary, $seenAt,
+        $hasConflicts, $authoredByMe, $maintainedByMe, $labels, $lastSignalAt, $lastSignalSummary, $seenAt,
         $baselineAt, $fetchedAt, $snapshotJson)
       ON CONFLICT(url) DO UPDATE SET instance = excluded.instance, kind = excluded.kind,
         repo = excluded.repo, title = excluded.title, state = excluded.state,
         state_detail = excluded.state_detail, ci_state = excluded.ci_state,
         has_conflicts = excluded.has_conflicts, authored_by_me = excluded.authored_by_me,
+        maintained_by_me = excluded.maintained_by_me,
         labels_json = excluded.labels_json, last_signal_at = excluded.last_signal_at,
         last_signal_summary = excluded.last_signal_summary, seen_at = excluded.seen_at,
         baseline_at = excluded.baseline_at, fetched_at = excluded.fetched_at,
@@ -173,6 +176,7 @@ export class Store {
         ...i,
         hasConflicts: i.hasConflicts ? 1 : 0,
         authoredByMe: i.authoredByMe ? 1 : 0,
+        maintainedByMe: i.maintainedByMe ? 1 : 0,
         labels: JSON.stringify(i.labels),
       });
   }

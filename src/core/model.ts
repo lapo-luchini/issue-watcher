@@ -42,6 +42,7 @@ export interface Snapshot {
   ciState?: CiState | null;
   hasConflicts?: boolean | null; // null: unknown (e.g. the forge is still computing it)
   authoredByMe: boolean;
+  maintainedByMe?: boolean; // the item belongs to a repo I maintain (e.g. a Radicle delegate)
   labels: string[];
   events: NormalizedEvent[];
 }
