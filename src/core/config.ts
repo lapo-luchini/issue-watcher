@@ -101,10 +101,13 @@ export function parseConfig(text: string, env: Record<string, string | undefined
     return inst;
   });
   const f = raw.filter ?? {};
+  if (typeof f !== "object" || Array.isArray(f)) throw new Error("config: 'filter' must be a mapping");
+  const min = f.min_comment_length ?? DEFAULT_FILTER.minCommentLength;
+  if (!Number.isInteger(min) || min < 0) throw new Error("config: filter: 'min_comment_length' must be a number of characters");
   const filter: FilterConfig = {
-    noisePatterns: f.noise_patterns ?? DEFAULT_FILTER.noisePatterns,
-    minCommentLength: f.min_comment_length ?? DEFAULT_FILTER.minCommentLength,
-    botAllowlist: f.bot_allowlist ?? DEFAULT_FILTER.botAllowlist,
+    noisePatterns: stringList(f.noise_patterns, "config: filter", "noise_patterns") ?? DEFAULT_FILTER.noisePatterns,
+    minCommentLength: min,
+    botAllowlist: stringList(f.bot_allowlist, "config: filter", "bot_allowlist") ?? DEFAULT_FILTER.botAllowlist,
   };
   for (const p of filter.noisePatterns) {
     try {

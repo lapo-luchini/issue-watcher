@@ -98,6 +98,15 @@ instances:
     .toThrow("config: instances[0]: 'repos' and 'web' are for radicle instances only");
 });
 
+test("filter settings are type-checked", () => {
+  const bad = (filter: string) => () => parseConfig(`instances: []\nfilter:\n  ${filter}`, {});
+  expect(bad("min_comment_length: '20'")).toThrow("config: filter: 'min_comment_length' must be a number of characters");
+  expect(bad("min_comment_length: -1")).toThrow("'min_comment_length' must be a number of characters");
+  expect(bad("noise_patterns: '^bump$'")).toThrow("config: filter: 'noise_patterns' must be a list of strings");
+  expect(bad("bot_allowlist: [3]")).toThrow("config: filter: 'bot_allowlist' must be a list of strings");
+  expect(() => parseConfig("instances: []\nfilter: [1]", {})).toThrow("config: 'filter' must be a mapping");
+});
+
 test("maintainer_domains: optional, lowercased, leading @ dropped", () => {
   const cfg = parseConfig("instances:\n  - {id: a, type: bugzilla, url: x, user: u, maintainer_domains: [FreeBSD.org, '@kde.org']}", {});
   expect(cfg.instances[0]?.maintainerDomains).toEqual(["freebsd.org", "kde.org"]);
