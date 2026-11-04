@@ -23,4 +23,10 @@
 
 ## Outcome
 
-(filled in at the end)
+All six tasks done on branch `plan-3-web` (based on `plan-2b-radicle`), test-first; 217 tests, type check clean. Checked in a real browser (Playwright, Chromium) on a seeded demo home: light, dark and phone widths, expanding a row with filtered events, starring (written to `items.yaml` and committed), no console errors. `watcher serve` started, answered, and stopped cleanly on SIGTERM.
+
+Also closed from plan 1's deferred list: the poll lock takes over dead holders (and records the PID namespace), the server reads everything through `api.ts` (state and state detail separately, lookup by id, events, status), filter settings are type-checked, `bot_allowlist` ignores case.
+
+An independent review found no critical issue; fixed after it: a double lock takeover race; entries vanishing from `items.yaml` when their settings were cleared (now never removed); `javascript:` URLs (refused in `items.yaml`, never linked); the Host check skipped when bound off loopback; Bun's development mode on by default; no clean shutdown; un-starring pinning `normal`; a stale result after a refused poll; muted rows lingering; commits silently including hand edits; allowed-host entries with ports.
+
+Still deferred: GitHub team review requests; inline review threads; logging when pagination stops at its page cap; HTTP timeouts while reading a body are not retried; URL case canonicalization (a hand-added URL whose owner/repo case differs from the forge's is a separate item).
