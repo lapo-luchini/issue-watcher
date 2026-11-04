@@ -2494,3 +2494,21 @@ git commit -m "Add watcher CLI (poll, list, seen, refilter) and README" -m "Co-A
 - [ ] **Step 7: Hand over to the user for real configuration** (not something an agent does)
 
 The user copies `data/config.example.yaml` to `data/config.yaml` with their real GitHub login and commits it, puts a classic token with `public_repo` + `notifications` in `.env`, then runs `bun run watcher poll` twice (baseline, then incremental) and `bun run watcher list`.
+
+---
+
+## Outcome and deferred review items
+
+Implemented on branch `plan-1-foundation-github`. Two code reviews led to follow-up fix commits (see `git log`): baselining only on an instance's first run, review-request discovery, own-commit recognition via `emails`, mergeability/CI "unknown" handling, URL canonicalization, a retry table so one failing item no longer freezes the cursor, safe stop on rate limits, a SQLite busy timeout, `seen --all`, best-effort CI and a cache-upgrade backfill.
+
+Deferred by agreement; to be considered when writing plan 3 (HTTP API + UI):
+- Comment-only reviews with an empty body are signal; inline review threads (`/pulls/N/comments`) are not fetched. Decide: fetch them, or drop empty-body reviews.
+- Review requests to a team I belong to are discovered but produce no `review_request` event.
+- Poll lock: store the pid and take over a lock whose process is dead, instead of the 30-minute stale window.
+- Pagination: check-runs read only page 1; `getAllPages` stops silently at 20 pages (newest timeline events dropped); PR commits cap at 250. At least log truncation.
+- Config values (`noise_patterns`, `min_comment_length`, `bot_allowlist`) are not type-checked; `bot_allowlist` matching is case-sensitive.
+- HTTP: timeouts while reading a body are not retried; GitHub secondary rate limits without rate-limit headers are treated as item failures.
+- One helper for API timestamps (search strips milliseconds, notifications keep them).
+- URL canonicalization: owner/repo case and PRs written as `/issues/N` still don't match.
+- A `--dry-run` holds one write transaction for the whole poll; revisit when the server's "Poll now" exists.
+- api.ts for the server: expose `state` and `stateDetail` separately, add lookup by item `id`, add an events/status read path so the server never touches `Store` directly; move `GoneError`/`HttpError` types to `model.ts` so the adapter contract is self-contained.
