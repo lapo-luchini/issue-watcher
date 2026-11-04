@@ -1,6 +1,7 @@
 // SQLite cache (var/cache.sqlite, git-ignored, rebuildable): items, events, poll runs, locks, retries.
 // All timestamps are ISO-8601 UTC strings from Date.toISOString(), so they compare correctly as text.
 import { Database } from "bun:sqlite";
+import { hostname } from "node:os";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, KnownItem, Verdict } from "./model.ts";
 
 export interface ItemRow {
@@ -85,6 +86,24 @@ CREATE TABLE IF NOT EXISTS retry (
   last_error TEXT NOT NULL, first_since TEXT, PRIMARY KEY (instance, item_url)
 );
 `;
+
+/** Identifies this process as a lock holder: "pid@hostname". */
+export function lockHolder(): string {
+  return `${process.pid}@${hostname()}`;
+}
+
+/** True when `holder` is a process of this host that has exited. Other hosts and formats: unknown, so false. */
+function holderIsGone(holder: string): boolean {
+  const m = holder.match(/^(\d+)@(.+)$/);
+  if (!m || m[2] !== hostname()) return false;
+  try {
+    process.kill(Number(m[1]), 0); // signal 0: only checks that the process exists
+    return false;
+  } catch (err) {
+    // EPERM: it exists but belongs to another user.
+    return (err as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
 
 /** Short stable id for URLs in the HTTP API. */
 export function itemId(url: string): string {
@@ -266,8 +285,14 @@ export class Store {
     this.db.query("DELETE FROM retry WHERE instance = $instance AND item_url = $itemUrl").run({ instance, itemUrl });
   }
 
-  /** Locks older than staleMs are assumed to belong to a crashed process and are taken over. */
+  /**
+   * Takes the named lock for `holder` (see lockHolder()). A lock whose holder process no longer
+   * exists on this host is taken over at once; one held from another host only once it is older
+   * than staleMs (its process cannot be checked from here).
+   */
   acquireLock(name: string, holder: string, now: Date, staleMs = 30 * 60_000): boolean {
+    const current = this.db.query("SELECT holder FROM locks WHERE name = $name").get({ name }) as { holder: string } | null;
+    if (current && holderIsGone(current.holder)) this.releaseLock(name);
     const staleBefore = new Date(now.getTime() - staleMs).toISOString();
     this.db.query("DELETE FROM locks WHERE name = $name AND acquired_at < $staleBefore").run({ name, staleBefore });
     return this.db.query("INSERT OR IGNORE INTO locks (name, holder, acquired_at) VALUES ($name, $holder, $at)")

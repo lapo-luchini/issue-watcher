@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FILTER } from "../src/core/config.ts";
 import { refilter } from "../src/core/poller.ts";
-import { itemId, Store, type EventRow, type ItemRow } from "../src/core/store.ts";
+import { itemId, lockHolder, Store, type EventRow, type ItemRow } from "../src/core/store.ts";
 
 let store: Store;
 beforeEach(() => {
@@ -88,6 +88,21 @@ test("locks exclude, release, and expire", () => {
   expect(store.acquireLock("poll", "b", t0)).toBe(true);
   const muchLater = new Date(t0.getTime() + 31 * 60_000);
   expect(store.acquireLock("poll", "c", muchLater)).toBe(true);
+});
+
+test("a lock held by a process that no longer exists on this host is taken over at once", () => {
+  const t0 = new Date("2026-11-04T10:00:00Z");
+  const host = lockHolder().split("@")[1];
+  // A pid that is certainly not running: spawn a process and wait for it to exit.
+  const dead = Bun.spawnSync(["true"]).pid;
+  expect(store.acquireLock("poll", `${dead}@${host}`, t0)).toBe(true);
+  expect(store.acquireLock("poll", lockHolder(), t0)).toBe(true);
+  // A live holder (this very process) keeps it.
+  expect(store.acquireLock("poll", `${dead}@${host}`, t0)).toBe(false);
+  store.releaseLock("poll");
+  // On another host liveness cannot be checked: only the 30-minute expiry applies.
+  expect(store.acquireLock("poll", `${dead}@another-host`, t0)).toBe(true);
+  expect(store.acquireLock("poll", lockHolder(), t0)).toBe(false);
 });
 
 test("waits for a busy database instead of failing at once", () => {

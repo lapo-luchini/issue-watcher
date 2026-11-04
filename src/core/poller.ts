@@ -4,7 +4,7 @@ import { classify } from "./filter.ts";
 import { GoneError, RateLimitError } from "./http.ts";
 import { effectivePriority, type Intent } from "./intent.ts";
 import type { Adapter, ItemRef, NormalizedEvent, Snapshot } from "./model.ts";
-import { itemId, type EventRow, type ItemRow, type Store } from "./store.ts";
+import { itemId, lockHolder, type EventRow, type ItemRow, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
 
 /** Each run re-queries this much before the cursor, to tolerate clock skew; event keys dedup the overlap. */
@@ -40,7 +40,7 @@ export async function pollAll(ctx: PollContext, opts: { only?: string; dryRun?: 
   const now = ctx.now ?? (() => new Date());
   const instances = ctx.config.instances.filter((i) => !opts.only || i.id === opts.only);
   if (opts.only && instances.length === 0) throw new Error(`unknown instance '${opts.only}'`);
-  if (!ctx.store.acquireLock("poll", `pid:${process.pid}`, now())) throw new Error("a poll is already running");
+  if (!ctx.store.acquireLock("poll", lockHolder(), now())) throw new Error("a poll is already running");
   if (opts.dryRun) ctx.store.begin(); // everything below is rolled back at the end
   try {
     const results: InstanceResult[] = [];
