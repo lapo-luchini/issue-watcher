@@ -33,8 +33,20 @@ authentication, MCP server, LLM-based filtering. The design keeps seams for all 
   - `bun:sqlite` for the cache, `Bun.serve` for HTTP, `bun test` for tests.
   - `yaml` npm package (not `Bun.YAML`) for the intent file, because rewriting it must
     preserve comments and ordering.
-- **Frontend**: Vue 3 single-file components built with Vite (`bunx vite build`) into
-  static files served by `Bun.serve`. This is the only build step in the project.
+- **Frontend**: Vue 3, **no build script**. `Bun.serve` serves `web/index.html` as an
+  HTML import (`import index from "../web/index.html"`), and Bun transpiles and bundles
+  the frontend TypeScript on the fly. The whole project is therefore just
+  `bun install` + `bun run`, with no Vite and no separate build step.
+  - Components are `.ts` modules exporting ``{ props, setup, template: `...` }``; templates
+    are compiled at runtime by Vue's full build (`vue/dist/vue.esm-bundler.js`, aliased
+    as `vue`), since Bun does not compile `.vue` SFCs.
+  - Accepted limits: no `.vue` SFCs, no `<style scoped>` (one plain stylesheet with
+    BEM-style class names), template errors surface at runtime in the browser console
+    rather than at compile time, ~50 KB extra for the runtime template compiler, no HMR.
+  - The first implementation task verifies Bun's HTML-import bundling with Vue
+    (runtime-compiler alias included) before building on it.
+  - Escape hatch if the UI grows large: move to Vite + SFCs; component logic carries
+    over almost unchanged.
 - TypeScript style: plain and readable for a JS developer — interfaces, type annotations,
   string-literal unions; no enums, decorators or advanced generics.
 
@@ -57,8 +69,8 @@ watcher/
   src/adapters/
     github.ts gitlab.ts forgejo.ts bugzilla.ts
   src/cli.ts             `watcher poll`, `watcher serve`, `watcher refilter`
-  src/server.ts          HTTP JSON API + static SPA
-  web/                   Vue 3 + Vite SPA
+  src/server.ts          HTTP JSON API + SPA (served via Bun HTML import)
+  web/                   Vue 3 SPA: index.html, main.ts, components/*.ts, style.css
   test/                  bun tests + fixtures/<forge>/
 ```
 
