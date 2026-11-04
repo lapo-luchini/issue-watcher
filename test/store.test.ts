@@ -1,4 +1,8 @@
 import { beforeEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { itemId, Store, type EventRow, type ItemRow } from "../src/core/store.ts";
 
 let store: Store;
@@ -72,6 +76,25 @@ test("locks exclude, release, and expire", () => {
 
 test("waits for a busy database instead of failing at once", () => {
   expect(store.db.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
+});
+
+test("caches from before is_baseline and first_since are upgraded in place", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "watcher-store-")), "cache.sqlite");
+  const old = new Database(path);
+  old.exec(`CREATE TABLE events (item_url TEXT NOT NULL, event_key TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL,
+    actor_role TEXT NOT NULL, at TEXT NOT NULL, detected_at TEXT NOT NULL, excerpt TEXT, details_json TEXT,
+    is_signal INTEGER NOT NULL, reason TEXT NOT NULL, PRIMARY KEY (item_url, event_key));
+    CREATE TABLE retry (instance TEXT NOT NULL, item_url TEXT NOT NULL, kind TEXT NOT NULL, attempts INTEGER NOT NULL,
+    last_error TEXT NOT NULL, PRIMARY KEY (instance, item_url));
+    INSERT INTO retry VALUES ('github', '${url}', 'pr', 1, 'boom');`);
+  old.close();
+  const upgraded = new Store(path);
+  expect(upgraded.listRetries("github")).toEqual([
+    { instance: "github", itemUrl: url, kind: "pr", attempts: 1, lastError: "boom", firstSince: null },
+  ]);
+  expect(upgraded.insertEvent(event)).toBe(true);
+  expect(upgraded.eventsFor(url)).toEqual([event]);
+  upgraded.close();
 });
 
 test("rollback discards writes", () => {

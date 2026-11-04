@@ -69,15 +69,20 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
       if (r) refs.set(r.url, r);
     }
     // Items whose fetch failed on earlier runs, even if discovery no longer reports them.
+    // If one turns out to be a first sighting, its events are judged against the `since` of
+    // the run where it first failed, so activity in between is not swallowed as baseline.
+    const retrySince = new Map<string, Date | null>();
     for (const r of ctx.store.listRetries(inst.id)) {
       if (!refs.has(r.itemUrl)) refs.set(r.itemUrl, { url: r.itemUrl, instance: inst.id, kind: r.kind });
+      retrySince.set(r.itemUrl, r.firstSince ? new Date(r.firstSince) : null);
     }
     const failures: string[] = [];
     await forEachLimit([...refs.values()], FETCH_CONCURRENCY, async (ref) => {
+      const itemSince = retrySince.has(ref.url) ? (retrySince.get(ref.url) ?? null) : since;
       try {
         const snap = await adapter.fetch(ref);
         result.fetched++;
-        result.newSignals += applySnapshot(snap, ctx, now(), since, log);
+        result.newSignals += applySnapshot(snap, ctx, now(), itemSince, log);
         ctx.store.clearRetry(inst.id, ref.url);
       } catch (err) {
         if (err instanceof GoneError) {
@@ -88,7 +93,7 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
         if (err instanceof RateLimitError) throw err; // stop the whole instance
         const message = (err as Error).message;
         failures.push(`${ref.url}: ${message}`);
-        if (ctx.store.recordFailure(inst.id, ref, message) >= MAX_FETCH_ATTEMPTS) {
+        if (ctx.store.recordFailure(inst.id, ref, message, itemSince) >= MAX_FETCH_ATTEMPTS) {
           ctx.store.clearRetry(inst.id, ref.url);
           log(`  giving up on ${ref.url} after ${MAX_FETCH_ATTEMPTS} failed attempts: ${message}`);
         }

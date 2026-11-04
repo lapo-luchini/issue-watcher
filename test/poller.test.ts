@@ -158,7 +158,9 @@ test("pollAll: a failed item is retried later without holding back the cursor; g
   expect(r).toMatchObject({ ok: false, newSignals: 1, error: `1 item(s) failed; first: ${PR}: boom` });
   expect(store.getItem(ISSUE)).toMatchObject({ state: "gone", lastSignalSummary: "→ gone" });
   expect(store.getCursor("github")).toBe(minutes(10).toISOString());
-  expect(store.listRetries("github")).toEqual([{ instance: "github", itemUrl: PR, kind: "pr", attempts: 1, lastError: "boom" }]);
+  expect(store.listRetries("github")).toEqual([
+    { instance: "github", itemUrl: PR, kind: "pr", attempts: 1, lastError: "boom", firstSince: null },
+  ]);
 
   // Next run: discovery no longer reports the PR, but the retry list does.
   adapter.discovered = [];
@@ -168,6 +170,30 @@ test("pollAll: a failed item is retried later without holding back the cursor; g
   expect(r2).toMatchObject({ ok: true, fetched: 1 });
   expect(store.getItem(PR)).not.toBeNull();
   expect(store.listRetries("github")).toEqual([]);
+});
+
+test("pollAll: a new item fetched only on retry is judged against the run where it first failed", async () => {
+  await pollAll(ctx); // run 1 at T0: sets the cursor
+  adapter.discovered = [{ url: ISSUE, instance: "github", kind: "issue" }];
+  adapter.snapshots.set(ISSUE, new Error("boom"));
+  clock = minutes(30);
+  await pollAll(ctx); // run 2: since = T0 - overlap; the new item fails
+  const since2 = new Date(T0.getTime() - CURSOR_OVERLAP_MS).toISOString();
+  expect(store.listRetries("github")[0]).toMatchObject({ attempts: 1, firstSince: since2 });
+  clock = minutes(60);
+  await pollAll(ctx); // run 3: still fails; firstSince is kept
+  expect(store.listRetries("github")[0]).toMatchObject({ attempts: 2, firstSince: since2 });
+
+  adapter.discovered = [];
+  adapter.snapshots.set(ISSUE, snapshot(ISSUE, [
+    comment("c:1", minutes(-30), "maintainer", "Old history"),
+    comment("c:2", minutes(10), "maintainer", "Posted between run 2 and run 3"), // before run 4's since
+  ]));
+  clock = minutes(90);
+  const [r] = await pollAll(ctx); // run 4: since = minutes(55)
+  expect(r).toMatchObject({ ok: true, newSignals: 1 });
+  expect(unread(ISSUE)).toBe(true);
+  expect(store.eventsFor(ISSUE).map((e) => [e.key, e.isBaseline])).toEqual([["c:2", false], ["c:1", true]]);
 });
 
 test("pollAll: an item that keeps failing is dropped after 5 attempts", async () => {

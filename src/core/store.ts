@@ -54,6 +54,9 @@ export interface RetryRow {
   kind: ItemKind;
   attempts: number;
   lastError: string;
+  // Discovery cursor (`since`) of the run where the fetch first failed; null if that was the
+  // instance's first run. A first sighting on retry is judged against it, not the current run's.
+  firstSince: string | null;
 }
 
 const SCHEMA = `
@@ -78,7 +81,7 @@ CREATE TABLE IF NOT EXISTS poll_runs (
 CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS retry (
   instance TEXT NOT NULL, item_url TEXT NOT NULL, kind TEXT NOT NULL, attempts INTEGER NOT NULL,
-  last_error TEXT NOT NULL, PRIMARY KEY (instance, item_url)
+  last_error TEXT NOT NULL, first_since TEXT, PRIMARY KEY (instance, item_url)
 );
 `;
 
@@ -117,11 +120,14 @@ export class Store {
     // A poll and a CLI/web command may write at the same time: wait for the lock instead of failing.
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
-    // Caches created before events.is_baseline existed.
-    const cols = this.db.query("PRAGMA table_info(events)").all() as { name: string }[];
-    if (!cols.some((c) => c.name === "is_baseline")) {
-      this.db.exec("ALTER TABLE events ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 0");
-    }
+    // Caches created before these columns existed.
+    this.addColumnIfMissing("events", "is_baseline", "INTEGER NOT NULL DEFAULT 0");
+    this.addColumnIfMissing("retry", "first_since", "TEXT");
+  }
+
+  private addColumnIfMissing(table: string, column: string, definition: string): void {
+    const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
   getItem(url: string): ItemRow | null {
@@ -208,15 +214,23 @@ export class Store {
   listRetries(instance: string): RetryRow[] {
     // `any`: raw SQLite rows, mapped field by field below.
     const rows = this.db.query("SELECT * FROM retry WHERE instance = $instance ORDER BY item_url").all({ instance }) as any[];
-    return rows.map((r) => ({ instance: r.instance, itemUrl: r.item_url, kind: r.kind, attempts: r.attempts, lastError: r.last_error }));
+    return rows.map((r) => ({
+      instance: r.instance, itemUrl: r.item_url, kind: r.kind, attempts: r.attempts, lastError: r.last_error,
+      firstSince: r.first_since,
+    }));
   }
 
-  /** Records one more failed fetch of an item and returns its number of failed attempts so far. */
-  recordFailure(instance: string, ref: ItemRef, error: string): number {
+  /**
+   * Records one more failed fetch of an item and returns its number of failed attempts so far.
+   * `since` is the failing run's discovery cursor; only the first failure's is kept.
+   */
+  recordFailure(instance: string, ref: ItemRef, error: string, since: Date | null): number {
     const r = this.db.query(`
-      INSERT INTO retry (instance, item_url, kind, attempts, last_error) VALUES ($instance, $url, $kind, 1, $error)
+      INSERT INTO retry (instance, item_url, kind, attempts, last_error, first_since)
+      VALUES ($instance, $url, $kind, 1, $error, $since)
       ON CONFLICT(instance, item_url) DO UPDATE SET attempts = attempts + 1, last_error = excluded.last_error
-      RETURNING attempts`).get({ instance, url: ref.url, kind: ref.kind, error }) as { attempts: number };
+      RETURNING attempts`)
+      .get({ instance, url: ref.url, kind: ref.kind, error, since: since?.toISOString() ?? null }) as { attempts: number };
     return r.attempts;
   }
 

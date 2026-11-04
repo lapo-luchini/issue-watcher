@@ -206,8 +206,11 @@ items:
   details_json, is_signal, reason, is_baseline — unique (item_url, event_key)
 - `poll_runs`: instance, started_at, finished_at, cursor, error
 - `locks`: name (PK), holder, acquired_at — prevents overlapping polls
-- `retry`: instance, item_url, kind, attempts, last_error — PK (instance, item_url); items
-  whose fetch failed, fetched again on the next runs
+- `retry`: instance, item_url, kind, attempts, last_error, first_since — PK (instance,
+  item_url); items whose fetch failed, fetched again on the next runs. `first_since` is the
+  discovery cursor of the run where the fetch first failed (null on an instance's first
+  run): if the item is a first sighting when it finally succeeds, its baseline is judged
+  against that, so activity between the failure and the retry still counts as new
 
 Rules:
 
