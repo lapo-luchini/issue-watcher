@@ -22,7 +22,9 @@ export function parseIntent(text: string): Intent {
   list.forEach((r: any, i: number) => {
     const where = `items.yaml: items[${i}]`;
     if (typeof r?.url !== "string" || r.url === "") throw new Error(`${where}: 'url' is required`);
-    if (!URL.canParse(r.url)) throw new Error(`${where}: invalid url '${r.url}'`);
+    if (!URL.canParse(r.url) || !/^https?:$/.test(new URL(r.url).protocol)) {
+      throw new Error(`${where}: invalid url '${r.url}' (http or https only)`);
+    }
     if (r.priority !== undefined && r.priority !== "important" && r.priority !== "normal") {
       throw new Error(`${where}: priority must be 'important' or 'normal'`);
     }

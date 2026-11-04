@@ -22,6 +22,8 @@ export const ItemRow = defineComponent({
       const parts = [STATE_LABELS[i.itemState] ?? i.itemState, i.stateDetail ?? ""].filter((s) => s);
       return parts.join(", ");
     });
+    // Only web links become clickable: a javascript: URL would run on this page, with the API's powers.
+    const href = computed(() => (/^https?:\/\//i.test(props.item.url) ? props.item.url : undefined));
     const ci = computed(() => (props.item.ciState === "failure" ? "CI failing" : props.item.ciState === "pending" ? "CI running" : ""));
 
     async function markSeen() {
@@ -61,7 +63,7 @@ export const ItemRow = defineComponent({
       if (open.value) markSeen();
     }
     return {
-      open, editingNote, noteDraft, busy, stateLabel, ci, markSeen, toggleStar, toggleMute, editNote, saveNote, copyUrl, toggle,
+      open, editingNote, noteDraft, busy, stateLabel, href, ci, markSeen, toggleStar, toggleMute, editNote, saveNote, copyUrl, toggle,
       relativeTime, absoluteTime,
     };
   },
@@ -72,7 +74,7 @@ export const ItemRow = defineComponent({
           :title="item.priority === 'important' ? 'Important: click to make it normal' : 'Mark important'"
           @click.stop="toggleStar">{{ item.priority === 'important' ? '★' : '☆' }}</button>
         <div class="item__main">
-          <a class="item__title" :href="item.url" target="_blank" rel="noopener noreferrer" @click.stop="markSeen">{{ item.title }}</a>
+          <a class="item__title" :href="href" target="_blank" rel="noopener noreferrer" @click.stop="markSeen">{{ item.title }}</a>
           <div class="item__meta">
             <span class="item__where"><span class="item__instance">{{ item.instance ?? 'manual' }}</span> {{ item.repo }}</span>
             <span v-if="stateLabel" class="item__state" :class="'item__state--' + item.itemState">{{ stateLabel }}</span>

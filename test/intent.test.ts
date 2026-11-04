@@ -36,6 +36,9 @@ test("validation", () => {
   expect(() => parseIntent("items:\n  - url: https://x.org/a\n    priority: high")).toThrow("priority must be");
   expect(() => parseIntent("items:\n  - url: https://x.org/a\n  - url: https://x.org/a")).toThrow("duplicate url");
   expect(() => parseIntent("items:\n  - url: lists.example.org/msg1\n    manual: true")).toThrow("items[0]: invalid url 'lists.example.org/msg1'");
+  // Only web links: a javascript: URL would become a script link in the web UI.
+  expect(() => parseIntent("items:\n  - url: \"javascript:alert(1)\"\n    manual: true")).toThrow("items[0]: invalid url 'javascript:alert(1)' (http or https only)");
+  expect(() => parseIntent("items:\n  - url: file:///etc/passwd\n    manual: true")).toThrow("(http or https only)");
 });
 
 test("effectivePriority defaults", () => {
