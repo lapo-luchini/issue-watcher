@@ -47,7 +47,9 @@ const cases: [string, NormalizedEvent, Priority, boolean, string][] = [
     { ...ev("flag", "bot", undefined, "phab-bot@bmo.tld"), details: { action: "added", flag: "review+" } }, "normal", true, "signal:flag"],
   ["flag request by a person",
     { ...ev("flag", "contributor"), details: { action: "added", flag: "needinfo?(me@x.org)" } }, "normal", true, "signal:flag"],
-  ["assignment by a bot", ev("assign", "bot", undefined, "bugzilla@freebsd.org"), "normal", false, "noise:bot"],
+  ["Bugzilla assignment by a bot",
+    { ...ev("assign", "bot", undefined, "bugzilla@freebsd.org"), details: { to: "maintainer@example.org" } }, "normal", false, "noise:bot"],
+  ["a bot assigning me (GitHub, GitLab, Forgejo)", ev("assign", "bot", undefined, "triage[bot]"), "normal", true, "signal:assign"],
   ["assignment by a person", ev("assign", "maintainer"), "normal", true, "signal:assign"],
   ["mention", ev("mention", "unknown"), "normal", true, "signal:mention"],
 ];

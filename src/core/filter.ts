@@ -53,8 +53,10 @@ export function classify(ev: NormalizedEvent, priority: Priority, cfg: FilterCon
     case "milestone":
       return ev.actorRole === "maintainer" && !bot ? signal(ev.kind) : noise(`${ev.kind}-by-non-maintainer`);
     case "assign":
-      // Automation assigning on its own (e.g. FreeBSD's Bugzilla auto-assigning ports PRs) is not news.
-      return bot ? noise("bot") : signal("assign");
+      // Bugzilla reports every assignee change (with `to`), and automation assigning on its own
+      // (FreeBSD auto-assigns ports PRs) is not news. Elsewhere `assign` means "I was assigned",
+      // which counts even when a triage bot did it.
+      return bot && ev.details?.to ? noise("bot") : signal("assign");
     case "flag":
       // A bot *requesting* a flag (e.g. "maintainer-feedback?" on every new ports PR) is routine;
       // a granted or denied flag (+/-) is news even when a bot relays it.
