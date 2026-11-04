@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { GitHubAdapter } from "../src/adapters/github.ts";
 import type { InstanceConfig } from "../src/core/config.ts";
 import { GoneError, HttpError, RateLimitError, type HttpDeps } from "../src/core/http.ts";
+import { expectAdapterContract } from "./contract.ts";
 
 const API = "https://api.github.com";
 const inst = { id: "github", type: "github" as const, url: API, user: "lapo", emails: [] as string[], token: "t" };
@@ -97,6 +98,10 @@ test("fetch normalizes a merged PR", async () => {
   expect(byKey["m:6"]).toMatchObject({ kind: "mention", actorRole: "unknown" });
   expect(byKey["s:8"]).toMatchObject({ kind: "state", details: { to: "merged" } });
   expect(byKey["commit:abc123def4567890"]).toMatchObject({ kind: "push", actorRole: "me", details: { sha: "abc123def456", message: "Fix build" } });
+});
+
+test("adapter contract", async () => {
+  await expectAdapterContract(fakeGitHub(prRoutes).adapter, { url: PR, instance: "github", kind: "pr" });
 });
 
 test("mergeable_state maps to hasConflicts, with unknown as null", async () => {

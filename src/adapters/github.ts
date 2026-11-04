@@ -1,7 +1,8 @@
 // GitHub (github.com, or GitHub Enterprise via its /api/v3 base URL).
 import type { InstanceConfig } from "../core/config.ts";
-import { defaultHttp, getAllPages, getJson, GoneError, HttpError, RateLimitError, type HttpDeps } from "../core/http.ts";
+import { defaultHttp, getAllPages, getJson, HttpError, RateLimitError, type HttpDeps } from "../core/http.ts";
 import type { ActorRole, Adapter, CiState, ItemRef, ItemState, NormalizedEvent, Snapshot } from "../core/model.ts";
+import { notGone, optional, parseUrl } from "./util.ts";
 
 // Only the fields we use from GitHub's REST responses.
 interface GhUser { login: string; type?: string }
@@ -40,19 +41,6 @@ interface GhNotification { subject?: { url?: string | null } }
 const MAINTAINER_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const FAILED_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"]);
 
-/**
- * Only a 404/410 on the item itself means it is gone; on a sub-request (timeline, commits,
- * CI…) it is an ordinary failure, so the item is retried instead of being marked gone.
- */
-async function notGone<T>(request: Promise<T>): Promise<T> {
-  try {
-    return await request;
-  } catch (err) {
-    if (err instanceof GoneError) throw new HttpError(err.status, err.url, err.message);
-    throw err;
-  }
-}
-
 export class GitHubAdapter implements Adapter {
   private readonly web: string;
   private readonly me: string;
@@ -84,12 +72,8 @@ export class GitHubAdapter implements Adapter {
 
   /** Also accepts URLs copied from the browser: a PR tab (/files, /commits, /checks), a query, a #fragment. */
   refFromUrl(url: string): ItemRef | null {
-    let u: URL;
-    try {
-      u = new URL(url);
-    } catch {
-      return null;
-    }
+    const u = parseUrl(url);
+    if (!u) return null;
     // URL.origin lowercases the host, so "https://GitHub.com" matches too.
     if (u.origin !== new URL(this.web).origin) return null;
     const m = u.pathname.match(/^\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d+)(?:\/(?:files|commits|checks))?\/?$/);
@@ -238,22 +222,12 @@ export class GitHubAdapter implements Adapter {
    * Best-effort: a source the token cannot read (403/404) counts as absent; null if neither is readable.
    */
   private async ciState(base: string, sha: string): Promise<CiState | null> {
-    const runs = await this.optional(this.get<{ check_runs: { status: string; conclusion: string | null }[] }>(`${base}/commits/${sha}/check-runs?per_page=100`));
-    const status = await this.optional(this.get<{ state: string; total_count: number }>(`${base}/commits/${sha}/status`));
+    const runs = await optional(this.get<{ check_runs: { status: string; conclusion: string | null }[] }>(`${base}/commits/${sha}/check-runs?per_page=100`));
+    const status = await optional(this.get<{ state: string; total_count: number }>(`${base}/commits/${sha}/status`));
     const states: CiState[] = (runs?.check_runs ?? []).map((r) =>
       r.status !== "completed" ? "pending" : FAILED_CONCLUSIONS.has(r.conclusion ?? "") ? "failure" : "success");
     if (status && status.total_count > 0) states.push(status.state === "success" ? "success" : status.state === "pending" ? "pending" : "failure");
     if (states.length === 0) return null;
     return states.includes("failure") ? "failure" : states.includes("pending") ? "pending" : "success";
-  }
-
-  /** null when the request is forbidden or not found; rate limits and other errors still throw. */
-  private async optional<T>(request: Promise<T>): Promise<T | null> {
-    try {
-      return await request;
-    } catch (err) {
-      if (err instanceof HttpError && !(err instanceof RateLimitError) && (err.status === 403 || err.status === 404)) return null;
-      throw err;
-    }
   }
 }
