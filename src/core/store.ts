@@ -36,6 +36,7 @@ export interface EventRow {
   details: Record<string, unknown> | null;
   isSignal: boolean;
   reason: string;
+  isBaseline: boolean; // history found on first sight of the item: never makes it unread
 }
 
 export interface PollRun {
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS events (
   item_url TEXT NOT NULL, event_key TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL,
   actor_role TEXT NOT NULL, at TEXT NOT NULL, detected_at TEXT NOT NULL, excerpt TEXT,
   details_json TEXT, is_signal INTEGER NOT NULL, reason TEXT NOT NULL,
+  is_baseline INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (item_url, event_key)
 );
 CREATE TABLE IF NOT EXISTS poll_runs (
@@ -88,7 +90,7 @@ function toEvent(r: any): EventRow {
     itemUrl: r.item_url, key: r.event_key, kind: r.kind, actor: r.actor, actorRole: r.actor_role,
     at: r.at, detectedAt: r.detected_at, excerpt: r.excerpt,
     details: r.details_json ? JSON.parse(r.details_json) : null,
-    isSignal: r.is_signal === 1, reason: r.reason,
+    isSignal: r.is_signal === 1, reason: r.reason, isBaseline: r.is_baseline === 1,
   };
 }
 
@@ -100,6 +102,11 @@ export class Store {
     this.db = new Database(path, { create: true, strict: true });
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(SCHEMA);
+    // Caches created before events.is_baseline existed.
+    const cols = this.db.query("PRAGMA table_info(events)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "is_baseline")) {
+      this.db.exec("ALTER TABLE events ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   getItem(url: string): ItemRow | null {
@@ -139,10 +146,15 @@ export class Store {
   insertEvent(e: EventRow): boolean {
     const res = this.db.query(`
       INSERT OR IGNORE INTO events (item_url, event_key, kind, actor, actor_role, at, detected_at,
-        excerpt, details_json, is_signal, reason)
+        excerpt, details_json, is_signal, reason, is_baseline)
       VALUES ($itemUrl, $key, $kind, $actor, $actorRole, $at, $detectedAt, $excerpt, $details,
-        $isSignal, $reason)`)
-      .run({ ...e, details: e.details ? JSON.stringify(e.details) : null, isSignal: e.isSignal ? 1 : 0 });
+        $isSignal, $reason, $isBaseline)`)
+      .run({
+        ...e,
+        details: e.details ? JSON.stringify(e.details) : null,
+        isSignal: e.isSignal ? 1 : 0,
+        isBaseline: e.isBaseline ? 1 : 0,
+      });
     return res.changes > 0;
   }
 

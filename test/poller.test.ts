@@ -62,7 +62,7 @@ const unread = (url: string) => {
 };
 
 test("first sight is baseline: history stored, nothing unread", () => {
-  const n = applySnapshot(snapshot(PR, [comment("c:1", minutes(-60), "maintainer", "Please rebase")]), ctx, T0);
+  const n = applySnapshot(snapshot(PR, [comment("c:1", minutes(-60), "maintainer", "Please rebase")]), ctx, T0, null);
   expect(n).toBe(0);
   expect(store.eventsFor(PR)).toHaveLength(1);
   expect(store.getItem(PR)).toMatchObject({ baselineAt: T0.toISOString(), lastSignalAt: null });
@@ -70,49 +70,49 @@ test("first sight is baseline: history stored, nothing unread", () => {
 });
 
 test("new signal after baseline makes the item unread, noise does not", () => {
-  applySnapshot(snapshot(PR, []), ctx, T0);
-  expect(applySnapshot(snapshot(PR, [comment("c:2", minutes(5), "contributor", "+1", "rando")]), ctx, minutes(10))).toBe(0);
+  applySnapshot(snapshot(PR, []), ctx, T0, null);
+  expect(applySnapshot(snapshot(PR, [comment("c:2", minutes(5), "contributor", "+1", "rando")]), ctx, minutes(10), null)).toBe(0);
   expect(unread(PR)).toBe(false);
-  expect(applySnapshot(snapshot(PR, [comment("c:3", minutes(15), "maintainer", "LGTM")]), ctx, minutes(20))).toBe(1);
+  expect(applySnapshot(snapshot(PR, [comment("c:3", minutes(15), "maintainer", "LGTM")]), ctx, minutes(20), null)).toBe(1);
   expect(store.getItem(PR)).toMatchObject({ lastSignalAt: minutes(20).toISOString(), lastSignalSummary: "comment by @maint: LGTM" });
   expect(unread(PR)).toBe(true);
 });
 
 test("re-fetching the same events is idempotent", () => {
-  applySnapshot(snapshot(PR, []), ctx, T0);
+  applySnapshot(snapshot(PR, []), ctx, T0, null);
   const s = snapshot(PR, [comment("c:3", minutes(15), "maintainer", "LGTM")]);
-  expect(applySnapshot(s, ctx, minutes(20))).toBe(1);
-  expect(applySnapshot(s, ctx, minutes(40))).toBe(0);
+  expect(applySnapshot(s, ctx, minutes(20), null)).toBe(1);
+  expect(applySnapshot(s, ctx, minutes(40), null)).toBe(0);
   expect(store.getItem(PR)?.lastSignalAt).toBe(minutes(20).toISOString());
 });
 
 test("my own reply after the latest signal marks the item seen", () => {
-  applySnapshot(snapshot(PR, []), ctx, T0);
+  applySnapshot(snapshot(PR, []), ctx, T0, null);
   applySnapshot(snapshot(PR, [
     comment("c:1", minutes(5), "maintainer", "Please rebase"),
     comment("c:2", minutes(8), "me", "Done, rebased.", "lapo"),
-  ]), ctx, minutes(10));
+  ]), ctx, minutes(10), null);
   expect(unread(PR)).toBe(false);
-  applySnapshot(snapshot(PR, [comment("c:3", minutes(12), "maintainer", "Thanks, merging after CI")]), ctx, minutes(15));
+  applySnapshot(snapshot(PR, [comment("c:3", minutes(12), "maintainer", "Thanks, merging after CI")]), ctx, minutes(15), null);
   expect(unread(PR)).toBe(true);
 });
 
 test("CI changes and conflicts are derived; pending keeps the last settled state", () => {
-  applySnapshot(snapshot(PR, [], { ciState: "success" }), ctx, T0);
-  expect(applySnapshot(snapshot(PR, [], { ciState: "pending" }), ctx, minutes(5))).toBe(0);
+  applySnapshot(snapshot(PR, [], { ciState: "success" }), ctx, T0, null);
+  expect(applySnapshot(snapshot(PR, [], { ciState: "pending" }), ctx, minutes(5), null)).toBe(0);
   expect(store.getItem(PR)?.ciState).toBe("success");
-  expect(applySnapshot(snapshot(PR, [], { ciState: "failure" }), ctx, minutes(10))).toBe(1);
+  expect(applySnapshot(snapshot(PR, [], { ciState: "failure" }), ctx, minutes(10), null)).toBe(1);
   expect(store.getItem(PR)?.lastSignalSummary).toBe("CI → failure");
-  expect(applySnapshot(snapshot(PR, [], { ciState: "failure", hasConflicts: true }), ctx, minutes(15))).toBe(1);
+  expect(applySnapshot(snapshot(PR, [], { ciState: "failure", hasConflicts: true }), ctx, minutes(15), null)).toBe(1);
   expect(store.getItem(PR)?.lastSignalSummary).toBe("merge conflict");
 });
 
 test("first green CI is not news; CI on a normal-priority item is stored as noise", () => {
-  applySnapshot(snapshot(PR, []), ctx, T0);
-  expect(applySnapshot(snapshot(PR, [], { ciState: "success" }), ctx, minutes(5))).toBe(0);
+  applySnapshot(snapshot(PR, []), ctx, T0, null);
+  expect(applySnapshot(snapshot(PR, [], { ciState: "success" }), ctx, minutes(5), null)).toBe(0);
   const other = "https://github.com/x/y/pull/1";
-  applySnapshot(snapshot(other, [], { authoredByMe: false, ciState: "success" }), ctx, T0);
-  expect(applySnapshot(snapshot(other, [], { authoredByMe: false, ciState: "failure" }), ctx, minutes(5))).toBe(0);
+  applySnapshot(snapshot(other, [], { authoredByMe: false, ciState: "success" }), ctx, T0, null);
+  expect(applySnapshot(snapshot(other, [], { authoredByMe: false, ciState: "failure" }), ctx, minutes(5), null)).toBe(0);
   expect(store.eventsFor(other, true)[0]?.reason).toBe("low-priority:ci");
 });
 
@@ -132,7 +132,7 @@ test("pollAll: discovery, intent-only items, cursor and overlap", async () => {
 });
 
 test("pollAll: a failed item keeps the cursor; gone items get one signal", async () => {
-  applySnapshot(snapshot(ISSUE, []), ctx, T0);
+  applySnapshot(snapshot(ISSUE, []), ctx, T0, null);
   adapter.discovered = [{ url: PR, instance: "github", kind: "pr" }, { url: ISSUE, instance: "github", kind: "issue" }];
   adapter.snapshots.set(PR, new Error("boom"));
   adapter.snapshots.set(ISSUE, new GoneError(404, "x"));
@@ -166,11 +166,33 @@ test("pollAll: dry run writes nothing; lock prevents overlap", async () => {
 });
 
 test("refilter re-evaluates stored events with a new config", () => {
-  applySnapshot(snapshot(PR, []), ctx, T0);
-  applySnapshot(snapshot(PR, [comment("c:1", minutes(5), "contributor", "works for me on 14.1 amd64 with the patch applied", "user")]), ctx, minutes(10));
+  applySnapshot(snapshot(PR, []), ctx, T0, null);
+  applySnapshot(snapshot(PR, [comment("c:1", minutes(5), "contributor", "works for me on 14.1 amd64 with the patch applied", "user")]), ctx, minutes(10), null);
   expect(unread(PR)).toBe(true);
   const stricter: Config = { ...config, filter: { ...DEFAULT_FILTER, noisePatterns: ["^works for me"] } };
   expect(refilter(store, stricter, new Map())).toEqual({ changed: 1 });
   expect(store.getItem(PR)?.lastSignalAt).toBeNull();
   expect(unread(PR)).toBe(false);
+});
+
+test("pollAll: an item first seen on an incremental run reports events after the cursor", async () => {
+  await pollAll(ctx); // first run: sets the cursor at T0
+  const other = "https://github.com/x/y/issues/3";
+  adapter.discovered = [{ url: ISSUE, instance: "github", kind: "issue" }, { url: other, instance: "github", kind: "issue" }];
+  adapter.snapshots.set(ISSUE, snapshot(ISSUE, [
+    comment("c:1", minutes(-60), "maintainer", "Old history"),
+    comment("c:2", minutes(10), "maintainer", "Can you look at this?"),
+    { key: "rr:3", kind: "review_request", actor: "maint", actorRole: "maintainer", at: minutes(20) },
+  ]));
+  adapter.snapshots.set(other, snapshot(other, [comment("c:9", minutes(-30), "maintainer", "Only old stuff")]));
+  clock = minutes(30);
+  const [r] = await pollAll(ctx);
+  expect(r).toMatchObject({ ok: true, newSignals: 2 });
+  expect(unread(ISSUE)).toBe(true);
+  expect(store.getItem(ISSUE)?.lastSignalSummary).toBe("review request by @maint");
+  expect(store.eventsFor(ISSUE).map((e) => [e.key, e.isBaseline])).toEqual([["rr:3", false], ["c:2", false], ["c:1", true]]);
+  expect(unread(other)).toBe(false);
+  refilter(store, config, new Map());
+  expect(store.getItem(ISSUE)).toMatchObject({ lastSignalAt: minutes(30).toISOString(), lastSignalSummary: "review request by @maint" });
+  expect(unread(other)).toBe(false);
 });

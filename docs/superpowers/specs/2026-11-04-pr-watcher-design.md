@@ -194,7 +194,7 @@ items:
   state_detail, ci_state, authored_by_me, labels_json, last_signal_at, last_signal_summary,
   seen_at, baseline_at, fetched_at, snapshot_json
 - `events`: item_url, event_key, kind, actor, actor_role, at, detected_at, excerpt,
-  details_json, is_signal, reason — unique (item_url, event_key)
+  details_json, is_signal, reason, is_baseline — unique (item_url, event_key)
 - `poll_runs`: instance, started_at, finished_at, cursor, error
 - `locks`: name (PK), holder, acquired_at — prevents overlapping polls
 
@@ -203,9 +203,12 @@ Rules:
 - **All events are stored**, noise included, with the filter verdict and `reason`
   (`signal:review`, `noise:+1`, `noise:bot`, …). `watcher refilter` re-evaluates stored
   events after filter changes without re-polling.
-- **Baseline**: the first time an item is seen, its existing events are stored with
-  `detected_at = baseline_at` and never make the item unread. A fresh cache therefore
-  starts quiet.
+- **Baseline**: events that predate our watching an item are stored with
+  `is_baseline = 1` and never make the item unread (`refilter` ignores them too). On an
+  instance's first run (no cursor yet) that is every event of every item, so a fresh cache
+  starts quiet. On later runs, an item seen for the first time (e.g. a new PR, or a new
+  review request) only has its events older than the run's `since` marked as baseline; the
+  newer ones count as usual. `baseline_at` records when the item was first seen.
 - **Detection time**: `last_signal_at` is when *we detected* the latest signal (local
   clock), not the forge timestamp, so unread compares local time with local time and a
   late-arriving event with an old timestamp (e.g. an old commit pushed now) still counts.

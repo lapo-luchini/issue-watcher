@@ -68,7 +68,7 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
       try {
         const snap = await adapter.fetch(ref);
         result.fetched++;
-        result.newSignals += applySnapshot(snap, ctx, now(), log);
+        result.newSignals += applySnapshot(snap, ctx, now(), since, log);
       } catch (err) {
         if (err instanceof GoneError) {
           result.newSignals += markGone(ref, ctx, now(), log);
@@ -130,9 +130,14 @@ function derivedEvents(prev: ItemRow | null, snap: Snapshot, ci: ItemRow["ciStat
 
 /**
  * Stores a fetched snapshot and returns how many new signal events it brought.
- * On first sight of an item everything is recorded as baseline (nothing unread).
+ * `since` is the discovery cursor of this run (null on the instance's first run).
+ * On first sight of an item, its history is recorded as baseline (never unread): all of it
+ * on the first run, only events older than `since` on later runs, so an item that is new
+ * since the last poll still reports what happened to it since then.
  */
-export function applySnapshot(snap: Snapshot, ctx: PollContext, now: Date, log: (line: string) => void = () => {}): number {
+export function applySnapshot(
+  snap: Snapshot, ctx: PollContext, now: Date, since: Date | null, log: (line: string) => void = () => {},
+): number {
   const { store, config, intent } = ctx;
   const url = snap.ref.url;
   const prev = store.getItem(url);
@@ -150,8 +155,9 @@ export function applySnapshot(snap: Snapshot, ctx: PollContext, now: Date, log: 
       itemUrl: url, key: ev.key, kind: ev.kind, actor: ev.actor, actorRole: ev.actorRole,
       at: ev.at.toISOString(), detectedAt: nowIso, excerpt: ev.body ? ev.body.slice(0, 500) : null,
       details: ev.details ?? null, isSignal: verdict.isSignal, reason: verdict.reason,
+      isBaseline: !prev && (since === null || ev.at < since),
     };
-    if (!store.insertEvent(row) || !prev) continue; // already known, or baseline
+    if (!store.insertEvent(row) || row.isBaseline) continue; // already known, or baseline
     if (ev.actorRole === "me") {
       if (!latestOwnAt || row.at > latestOwnAt) latestOwnAt = row.at;
       continue;
@@ -190,7 +196,7 @@ function markGone(ref: ItemRef, ctx: PollContext, now: Date, log: (line: string)
   const row: EventRow = {
     itemUrl: ref.url, key: `gone:${nowIso}`, kind: "state", actor: "", actorRole: "unknown",
     at: nowIso, detectedAt: nowIso, excerpt: null, details: { to: "gone" },
-    isSignal: true, reason: "signal:state",
+    isSignal: true, reason: "signal:state", isBaseline: false,
   };
   ctx.store.insertEvent(row);
   ctx.store.upsertItem({ ...prev, state: "gone", lastSignalAt: nowIso, lastSignalSummary: summarize(row), fetchedAt: nowIso });
@@ -214,7 +220,7 @@ export function refilter(store: Store, config: Config, intent: Intent): { change
       }
     }
     const latest = store.eventsFor(item.url)
-      .filter((e) => e.detectedAt > item.baselineAt)
+      .filter((e) => !e.isBaseline)
       .sort((a, b) => b.detectedAt.localeCompare(a.detectedAt) || b.at.localeCompare(a.at))[0];
     store.upsertItem({
       ...item,
