@@ -340,6 +340,17 @@ GET    /api/status                   per-instance last poll result
 so there is no built-in auth; exposing it (`WATCHER_HOST`) must be done behind a reverse
 proxy with authentication, which is documented in the README.
 
+Because any web page the user visits can send requests to a local port, the server also:
+- accepts, while bound to loopback, only loopback `Host` names (plus the names listed in
+  `WATCHER_ALLOWED_HOSTS`, for a proxy), so a page cannot point its own DNS name at
+  127.0.0.1 and read the API (DNS rebinding);
+- accepts changes only as `Content-Type: application/json` and, when the browser sends an
+  `Origin`, only from the page's own host, which a cross-site form or `fetch` cannot do (CSRF).
+
+`POST /api/poll` runs the poll in the background (202) and answers 409 while any poll runs,
+including cron's (the poll lock records `pid@host`; a lock whose process has died is taken
+over at once). `items.yaml` is re-read on every request; writes to it are serialized.
+
 ## 7. Error handling and rate limits
 
 - **Per-instance isolation**: one failing instance (down, bad token) does not affect the
