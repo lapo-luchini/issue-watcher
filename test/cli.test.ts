@@ -39,6 +39,12 @@ function seenAt(): string | null {
   }
 }
 
+test("serve rejects a bad port", () => {
+  const r = watcher("serve", "--port", "abc");
+  expect(r.code).toBe(2);
+  expect(r.err).toContain("invalid port 'abc'");
+});
+
 test("seen without URLs refuses to mark everything", () => {
   const r = watcher("seen");
   expect(r.code).toBe(2);

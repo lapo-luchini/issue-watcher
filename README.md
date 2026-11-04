@@ -50,10 +50,32 @@ bun run watcher poll [--instance ID] [--dry-run]
 bun run watcher list [--all] [--muted]
 bun run watcher seen URL... | --all
 bun run watcher refilter
+bun run watcher serve [--port N] [--host H]
 ```
 
 `seen` takes item URLs as `list` shows them (a URL copied from the browser, e.g. with
 `/files` or a `#fragment`, works too); marking everything seen needs `seen --all`.
+
+## Web UI
+
+```sh
+bun run watcher serve            # http://127.0.0.1:8411/  (--port N, --host H; or WATCHER_PORT, WATCHER_HOST)
+```
+
+The page lists every tracked item, important ones first, then by latest activity; unread items
+have a blue bar on the left. Click a row for its history (tick "Show filtered" to also see what
+the noise filter dropped, and why), to mute it, or to add a note; the star toggles importance.
+"Add item" takes any URL: forge items are fetched on the next poll, other pages (a
+mailing-list post, say) are listed as manual items. "Poll now" polls in the background.
+
+Stars, mutes, notes and added items are written to `data/items.yaml` (comments and order kept)
+and committed to git, one commit per change, with the repository's git identity. If the commit
+fails, the change is still saved and the page says why.
+
+The server has no authentication: it listens on 127.0.0.1 only, and refuses requests that do
+not come from its own page. To reach it from elsewhere, put it behind a reverse proxy that
+authenticates, and tell the server the public name the proxy forwards
+(`WATCHER_ALLOWED_HOSTS=watcher.example.org`, comma-separated); never expose it directly.
 
 ## Polling periodically
 

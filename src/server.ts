@@ -17,6 +17,7 @@ export interface ServerOptions {
   home: string; // the watcher's directory: data/config.yaml, data/items.yaml, var/cache.sqlite
   port?: number; // 0: any free port
   hostname?: string; // default 127.0.0.1
+  allowedHosts?: string[]; // extra Host names accepted on loopback, e.g. the name a reverse proxy forwards
   adapterFor?: (inst: InstanceConfig) => Adapter; // tests replace the real forges
   now?: () => Date;
 }
@@ -47,6 +48,7 @@ export async function startServer(opts: ServerOptions) {
   mkdirSync(join(opts.home, "var"), { recursive: true });
   const store = new Store(join(opts.home, "var/cache.sqlite"));
   const hostname = opts.hostname ?? "127.0.0.1";
+  const allowedHosts = new Set((opts.allowedHosts ?? []).map((h) => h.trim().toLowerCase()).filter((h) => h));
   let polling: Promise<void> | null = null;
   let lastPoll: PollReport | null = null;
 
@@ -65,8 +67,10 @@ export async function startServer(opts: ServerOptions) {
     const url = new URL(req.url);
     const host = req.headers.get("host") ?? url.host;
     if (LOOPBACK.has(hostname) || hostname === "::1") {
-      const name = host.replace(/:\d+$/, "");
-      if (!LOOPBACK.has(name)) throw new HttpError(403, `unexpected Host '${host}'`);
+      const name = host.replace(/:\d+$/, "").toLowerCase();
+      if (!LOOPBACK.has(name) && !allowedHosts.has(name)) {
+        throw new HttpError(403, `unexpected Host '${host}' (behind a proxy? add it to WATCHER_ALLOWED_HOSTS)`);
+      }
     }
     if (req.method === "GET" || req.method === "HEAD") return;
     if (!(req.headers.get("content-type") ?? "").startsWith("application/json")) {

@@ -9,13 +9,15 @@ import { loadConfig } from "./core/config.ts";
 import { loadIntent } from "./core/intent.ts";
 import { pollAll, refilter } from "./core/poller.ts";
 import { Store } from "./core/store.ts";
+import { startServer } from "./server.ts";
 
 const USAGE = `usage: watcher <command> [options]
 
   poll [--instance ID] [--dry-run]   poll forges for changes (--dry-run saves nothing)
   list [--all] [--muted]             show unread items (--all: every item)
   seen URL... | seen --all           mark the given items (or all items) seen
-  refilter                           re-run the noise filter over stored events`;
+  refilter                           re-run the noise filter over stored events
+  serve [--port N] [--host H]        web UI on http://127.0.0.1:8411/ (env: WATCHER_PORT, WATCHER_HOST)`;
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -26,6 +28,8 @@ async function main(argv: string[]): Promise<number> {
       "dry-run": { type: "boolean" },
       all: { type: "boolean" },
       muted: { type: "boolean" },
+      port: { type: "string" },
+      host: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -40,6 +44,19 @@ async function main(argv: string[]): Promise<number> {
   }
 
   const home = process.env.WATCHER_HOME ?? join(import.meta.dir, "..");
+  if (cmd === "serve") {
+    const port = Number(values.port ?? process.env.WATCHER_PORT ?? 8411);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) {
+      console.error(`watcher: invalid port '${values.port ?? process.env.WATCHER_PORT}'`);
+      return 2;
+    }
+    const srv = await startServer({
+      home, port, hostname: values.host ?? process.env.WATCHER_HOST ?? "127.0.0.1",
+      allowedHosts: (process.env.WATCHER_ALLOWED_HOSTS ?? "").split(","),
+    });
+    console.log(`watcher: serving ${srv.url} (Ctrl-C to stop)`);
+    await new Promise(() => {}); // until killed
+  }
   const config = await loadConfig(join(home, "data/config.yaml"));
   const { intent, unknown } = canonicalIntentFor(config, await loadIntent(join(home, "data/items.yaml")));
   for (const url of unknown) console.error(`watcher: warning: items.yaml: no configured instance recognizes ${url}; ignored`);

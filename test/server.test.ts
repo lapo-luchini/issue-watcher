@@ -154,6 +154,18 @@ test("guards: Host must be a loopback name; changes must be JSON from this origi
   expect((await api("/api/nope")).status).toBe(404);
 });
 
+test("behind a reverse proxy: an allowed public Host, with a https origin, is accepted", async () => {
+  await srv.stop();
+  srv = await startServer({ home, port: 0, adapterFor: () => adapter, allowedHosts: ["Watcher.Example.org"] });
+  expect((await api("/api/items", { headers: { host: "watcher.example.org" } })).status).toBe(200);
+  const proxied = await api("/api/seen", {
+    method: "POST", body: "{}",
+    headers: { host: "watcher.example.org", origin: "https://watcher.example.org", "content-type": "application/json" },
+  });
+  expect(proxied.status).toBe(200);
+  expect((await api("/api/items", { headers: { host: "evil.example" } })).status).toBe(403);
+});
+
 test("GET / serves the web UI", async () => {
   const res = await api("/");
   expect(res.status).toBe(200);
