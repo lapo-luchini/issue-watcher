@@ -38,6 +38,17 @@ const cases: [string, NormalizedEvent, Priority, boolean, string][] = [
   ["own push", ev("push", "me"), "important", false, "noise:own"],
   ["conflict on normal", ev("conflict", "unknown"), "normal", false, "low-priority:conflict"],
   ["bugzilla flag", ev("flag", "maintainer"), "normal", true, "signal:flag"],
+  ["flag request by a bot",
+    { ...ev("flag", "bot", undefined, "bugzilla@freebsd.org"), details: { action: "added", flag: "maintainer-feedback?(x@y.org)" } },
+    "important", false, "noise:bot"],
+  ["bare flag request by a bot",
+    { ...ev("flag", "bot", undefined, "phab-bot@bmo.tld"), details: { action: "added", flag: "review?" } }, "important", false, "noise:bot"],
+  ["flag grant relayed by a bot",
+    { ...ev("flag", "bot", undefined, "phab-bot@bmo.tld"), details: { action: "added", flag: "review+" } }, "normal", true, "signal:flag"],
+  ["flag request by a person",
+    { ...ev("flag", "contributor"), details: { action: "added", flag: "needinfo?(me@x.org)" } }, "normal", true, "signal:flag"],
+  ["assignment by a bot", ev("assign", "bot", undefined, "bugzilla@freebsd.org"), "normal", false, "noise:bot"],
+  ["assignment by a person", ev("assign", "maintainer"), "normal", true, "signal:assign"],
   ["mention", ev("mention", "unknown"), "normal", true, "signal:mention"],
 ];
 

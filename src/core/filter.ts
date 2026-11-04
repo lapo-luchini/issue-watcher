@@ -52,9 +52,21 @@ export function classify(ev: NormalizedEvent, priority: Priority, cfg: FilterCon
     case "label":
     case "milestone":
       return ev.actorRole === "maintainer" && !bot ? signal(ev.kind) : noise(`${ev.kind}-by-non-maintainer`);
+    case "assign":
+      // Automation assigning on its own (e.g. FreeBSD's Bugzilla auto-assigning ports PRs) is not news.
+      return bot ? noise("bot") : signal("assign");
+    case "flag":
+      // A bot *requesting* a flag (e.g. "maintainer-feedback?" on every new ports PR) is routine;
+      // a granted or denied flag (+/-) is news even when a bot relays it.
+      return bot && isFlagRequest(ev) ? noise("bot") : signal("flag");
     default:
       return signal(ev.kind);
   }
+}
+
+/** Bugzilla flag requests look like "review?" or "needinfo?(someone@example.org)". */
+function isFlagRequest(ev: NormalizedEvent): boolean {
+  return ev.details?.action === "added" && /\?(\(|$)/.test(String(ev.details?.flag ?? ""));
 }
 
 function classifyComment(ev: NormalizedEvent, bot: boolean, cfg: FilterConfig): Verdict {

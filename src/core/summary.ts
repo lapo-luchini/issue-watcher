@@ -24,6 +24,12 @@ export function summarize(e: Pick<EventRow, "kind" | "actor" | "excerpt" | "deta
       return "merge conflict";
     case "push":
       return `push${by}` + (d.message ? `: ${d.message}` : "");
+    case "flag":
+      return `flag ${sign}${d.flag}${by}`;
+    case "attachment":
+      return `attachment ${d.action ?? "added"}${by}` + (d.summary ? `: ${oneLine(String(d.summary))}` : "");
+    case "assign":
+      return `assign${d.to ? ` → ${d.to}` : ""}${by}`;
     default:
       return `${e.kind.replace("_", " ")}${by}`;
   }
