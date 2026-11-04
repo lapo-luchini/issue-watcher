@@ -216,7 +216,8 @@ Rules:
   late-arriving event with an old timestamp (e.g. an old commit pushed now) still counts.
 - **Unread** ⇔ `last_signal_at > seen_at` (or `seen_at` null and any `last_signal_at`).
 - **Own activity**: my own event newer than the latest new signal sets `seen_at`.
-- **CI**: `ci_state` keeps the last *settled* result (`pending` does not overwrite it); a
+- **CI**: `ci_state` keeps the last *settled* result (`pending`, or no CI result at all as
+  happens briefly right after a push, does not overwrite it); a
   first green result is not signal, a first red one or any later change is.
 - **Conflicts**: an unknown mergeability (GitHub's `mergeable_state: "unknown"` while it
   recomputes) keeps the previous stored value, so a conflict is signalled only once.

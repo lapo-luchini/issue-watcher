@@ -143,8 +143,9 @@ export function applySnapshot(
   const prev = store.getItem(url);
   const nowIso = now.toISOString();
   const priority = effectivePriority(intent.get(url), snap.ref.kind, snap.authoredByMe);
-  // CI: remember the last settled result; "pending" does not overwrite it.
-  const ci = snap.ciState === "pending" ? (prev?.ciState ?? null) : (snap.ciState ?? null);
+  // CI: remember the last settled result; "pending" and no result at all (e.g. no check
+  // runs yet right after a push) do not overwrite it.
+  const ci = snap.ciState === "success" || snap.ciState === "failure" ? snap.ciState : (prev?.ciState ?? null);
   // Conflicts: unknown (null/undefined) keeps the previous value.
   const conflicts = snap.hasConflicts ?? prev?.hasConflicts ?? false;
 
