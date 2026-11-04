@@ -127,17 +127,32 @@ export class RadicleAdapter implements Adapter {
       }
     }
     for (const k of known) {
-      // Known as open, but not listed as open any more: fetch it to see what became of it.
+      // Every item known as open is checked again: one still listed costs nothing (it may no
+      // longer involve me, e.g. added by hand or unassigned, but I still follow it); one no
+      // longer listed as open costs a request and shows what became of it.
       // (A URL under an old `web` base no longer parses: skip it.)
-      if (k.state === "open" && !this.listed.has(k.url) && this.refFromUrl(k.url)) refs.set(k.url, this.refFromUrl(k.url)!);
+      const ref = k.state === "open" ? this.refFromUrl(k.url) : null;
+      if (ref) refs.set(ref.url, ref);
     }
     return [...refs.values()];
   }
 
   private async watchedRepos(): Promise<string[]> {
     if (this.inst.repos) return this.inst.repos;
-    // My own node: every repo it seeds.
-    return (await this.pages<{ rid: string }>("/repos?show=all")).map((r) => r.rid);
+    // My own node: every repo it seeds. The listing already has each repo's delegates and
+    // name, so their facts need no request of their own.
+    const repos = await this.pages<RadRepo>("/repos?show=all");
+    for (const r of repos) if (!this.repoFacts.has(r.rid)) this.repoFacts.set(r.rid, this.toFacts(r));
+    return repos.map((r) => r.rid);
+  }
+
+  private toFacts(repo: RadRepo): RepoFacts {
+    const delegates = new Set(repo.delegates.map((d) => d.id));
+    return {
+      name: repo.payloads?.["xyz.radicle.project"]?.data?.name ?? repo.rid,
+      delegates,
+      mine: [...delegates].some((d) => this.me.has(d)),
+    };
   }
 
   /** Name and delegates of a repo, cached. In discovery a missing repo is a configuration error. */
@@ -151,12 +166,7 @@ export class RadicleAdapter implements Adapter {
         if (discovering && err instanceof GoneError) throw new Error(`Radicle repo ${rid} not found on ${this.inst.url}: is it seeded there?`);
         throw err;
       }
-      const delegates = new Set(repo.delegates.map((d) => d.id));
-      facts = {
-        name: repo.payloads?.["xyz.radicle.project"]?.data?.name ?? rid,
-        delegates,
-        mine: [...delegates].some((d) => this.me.has(d)),
-      };
+      facts = this.toFacts({ ...repo, rid });
       this.repoFacts.set(rid, facts);
     }
     return facts;
@@ -212,13 +222,15 @@ export class RadicleAdapter implements Adapter {
       state = s === "merged" ? "merged" : s === "archived" ? "closed" : "open";
       stateDetail = s === "draft" || s === "archived" ? s : undefined;
     }
-    // No history of state or assignee changes: one event per state reached, and one when I
-    // first appear among the assignees, timed by the item's latest activity.
+    // No history of state or assignee changes: an event when a closed/archived state is seen,
+    // and one when I first appear among the assignees, timed by the item's latest activity.
+    // The state key counts the activity so far, so closing again after a reopen and some new
+    // activity is reported again (a reopen and re-close with nothing in between is not).
     const latest = new Date(Math.max(0, ...events.map((e) => e.at.getTime())));
     const anon = { actor: "", actorRole: "unknown" as const, at: latest };
     const closedAs = "discussion" in item ? (item.state.status === "closed" ? "closed" : null)
       : item.state.status === "archived" ? "archived" : null;
-    if (closedAs) events.push({ ...anon, key: `s:${closedAs}`, kind: "state", details: { to: closedAs } });
+    if (closedAs) events.push({ ...anon, key: `s:${closedAs}:${events.length}`, kind: "state", details: { to: closedAs } });
     if (item.assignees.some((a) => this.me.has(a.id))) events.push({ ...anon, key: "a:me", kind: "assign" });
 
     return {
@@ -230,6 +242,8 @@ export class RadicleAdapter implements Adapter {
       ciState: null,
       authoredByMe: this.me.has(item.author.id),
       maintainedByMe: facts.mine,
+      // Author clocks, and items that reach the node late by gossip.
+      timesUnreliable: true,
       labels: item.labels,
       events,
     };

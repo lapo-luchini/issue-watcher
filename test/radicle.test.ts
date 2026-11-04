@@ -112,14 +112,14 @@ test("fetch normalizes an issue: comments, closed state, assignment, roles of al
     authoredByMe: true, maintainedByMe: false, labels: ["bug"], ciState: null,
   });
   const byKey = Object.fromEntries(snap.events.map((e) => [e.key, e]));
-  expect(Object.keys(byKey).sort()).toEqual(["a:me", `c:${hex("a")}`, `c:${hex("b")}`, `c:${ISSUE_ID}`, "s:closed"].sort());
+  expect(Object.keys(byKey).sort()).toEqual(["a:me", `c:${hex("a")}`, `c:${hex("b")}`, `c:${ISSUE_ID}`, "s:closed:3"].sort());
   expect(byKey[`c:${ISSUE_ID}`]).toMatchObject({ kind: "comment", actor: "lapo-nix", actorRole: "me" }); // second identity
   expect(byKey[`c:${ISSUE_ID}`]?.at.toISOString()).toBe(new Date(T * 1000).toISOString());
   expect(byKey[`c:${hex("a")}`]).toMatchObject({ actor: "lorenz", actorRole: "maintainer", body: "Fixed in commit 3da781f." });
   expect(byKey[`c:${hex("b")}`]).toMatchObject({ actor: "alice", actorRole: "contributor" });
   // No history of state changes: one event per state, timed by the latest activity.
-  expect(byKey["s:closed"]).toMatchObject({ kind: "state", actor: "", actorRole: "unknown", details: { to: "closed" } });
-  expect(byKey["s:closed"]?.at.toISOString()).toBe(new Date((T + 120) * 1000).toISOString());
+  expect(byKey["s:closed:3"]).toMatchObject({ kind: "state", actor: "", actorRole: "unknown", details: { to: "closed" } });
+  expect(byKey["s:closed:3"]?.at.toISOString()).toBe(new Date((T + 120) * 1000).toISOString());
   expect(byKey["a:me"]).toMatchObject({ kind: "assign", actorRole: "unknown" });
 });
 
@@ -151,7 +151,7 @@ test("patch states: draft is open, archived is closed; a rejected review asks fo
   expect(d.events.some((e) => e.kind === "state")).toBe(false);
   const a = await fake({ ...itemRoutes, [`/repos/${RID}/patches/${PATCH_ID}`]: archived }).adapter.fetch(patchRef);
   expect(a).toMatchObject({ state: "closed", stateDetail: "archived" });
-  expect(a.events.find((e) => e.key === "s:archived")?.details).toEqual({ to: "archived" });
+  expect(a.events.find((e) => e.key.startsWith("s:archived:"))?.details).toEqual({ to: "archived" });
   // A reviewer without an alias is shown by a short form of their DID.
   expect(a.events.find((e) => e.key === `r:${hex("9")}`)).toMatchObject({ actor: "z6MkLorenz", details: { state: "changes_requested" } });
 });
@@ -198,30 +198,48 @@ test("discover: open items involving me in the configured repos, every item in r
   expect(calls.length).toBe(before);
 });
 
-test("discover: known items no longer listed as open are re-checked; closed ones are not", async () => {
+test("discover: every known open item is checked again; closed ones are not", async () => {
+  const stillListed = { ...issue, id: hex("3"), author: who(OTHER), assignees: [], discussion: [comment(hex("3"), OTHER, "alice", "Not mine", T)] };
+  const stillListedRef: ItemRef = { url: `${WEB}/${RID}/issues/${hex("3")}`, instance: "rad", kind: "issue" };
   const known: KnownItem[] = [
     { ...issueRef, state: "open" }, // closed since: not in the open listing any more
+    { ...stillListedRef, state: "open" }, // still open but no longer involving me (added by hand, unassigned…)
     { ...patchRef, state: "merged" }, // already closed in the cache: left alone
     { url: `https://elsewhere.example/${RID}/issues/${ISSUE_ID}`, instance: "rad", kind: "issue", state: "open" }, // old web base
   ];
-  const { adapter, calls } = fake({ [`/repos/${RID}`]: repoInfo([DELEGATE]), ...listings(RID, [], []) });
+  const { adapter, calls } = fake({ [`/repos/${RID}`]: repoInfo([DELEGATE]), ...listings(RID, [stillListed], []) });
   // The cursor plays no part: Radicle timestamps come from the authors' clocks.
-  expect(await adapter.discover(new Date("2026-11-04T10:00:00Z"), known)).toEqual([issueRef]);
+  expect(await adapter.discover(new Date("2026-11-04T10:00:00Z"), known)).toEqual([issueRef, stillListedRef]);
   expect(calls.filter((c) => c.includes("status="))).toHaveLength(3);
+  // The still-listed one is fetched from the listing, without a request.
+  const before = calls.length;
+  await adapter.fetch(stillListedRef);
+  expect(calls.length).toBe(before);
 });
 
-test("discover without a repos list watches every repo the node seeds", async () => {
-  const page = (n: number, count: number) => Array.from({ length: count }, (_, i) => ({ rid: `rad:z${n}x${i}` }));
+test("discover without a repos list watches every repo the node seeds, with no request per repo for its facts", async () => {
+  const page = (n: number, count: number) => Array.from({ length: count }, (_, i) => ({ ...repoInfo([DELEGATE]), rid: `rad:z${n}x${i}` }));
   const routes: Record<string, Route> = {
     "/repos?show=all&page=0&perPage=100": page(0, 100),
     "/repos?show=all&page=1&perPage=100": page(1, 1),
   };
-  for (const r of [...page(0, 100), ...page(1, 1)]) {
-    routes[`/repos/${r.rid}`] = repoInfo([DELEGATE]);
-    Object.assign(routes, listings(r.rid, [], []));
-  }
-  const { adapter } = fake(routes, { repos: undefined });
+  for (const r of [...page(0, 100), ...page(1, 1)]) Object.assign(routes, listings(r.rid, [], []));
+  const { adapter, calls } = fake(routes, { repos: undefined });
   expect(await adapter.discover(null, [])).toEqual([]);
+  expect(calls).toHaveLength(2 + 101 * 3); // two listing pages, then 3 listings per repo
+});
+
+test("a closed state is reported again after a reopen and new activity", async () => {
+  const { adapter } = fake(itemRoutes);
+  const first = (await adapter.fetch(issueRef)).events.find((e) => e.kind === "state")!.key;
+  const reclosed = { ...issue, discussion: [...issue.discussion, comment(hex("c"), DELEGATE, "lorenz", "Reopening: still broken.", T + 500)] };
+  const again = (await fake({ ...itemRoutes, [`/repos/${RID}/issues/${ISSUE_ID}`]: reclosed }).adapter.fetch(issueRef))
+    .events.find((e) => e.kind === "state")!.key;
+  expect(again).not.toBe(first);
+});
+
+test("snapshots say their timestamps cannot be trusted", async () => {
+  expect((await fake(itemRoutes).adapter.fetch(issueRef)).timesUnreliable).toBe(true);
 });
 
 test("a configured repo the node does not have is an error, not silence", async () => {
