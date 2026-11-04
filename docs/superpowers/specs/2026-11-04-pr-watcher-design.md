@@ -91,8 +91,10 @@ interface Adapter {
   // Parse a web URL belonging to this instance (items added by hand, UI validation).
   refFromUrl(url: string): ItemRef | null;
   // Items involving me that changed since `since` (incremental discovery).
-  // `since` null = first run: open items only.
-  discover(since: Date | null): Promise<ItemRef[]>;
+  // `since` null = first run: open items only. `known`: this instance's cached items that
+  // may still change (open, or fetched in the last 30 days), for forges whose search cannot
+  // find items I only commented on (GitLab checks them for updates in batches).
+  discover(since: Date | null, known: ItemRef[]): Promise<ItemRef[]>;
   // Full current view of one item, with its complete normalized timeline.
   fetch(ref: ItemRef): Promise<Snapshot>;
 }
@@ -134,11 +136,30 @@ returned items:
   `reviewed-by:USER` (which `involves:` does not cover), deduplicated by URL. Plus, on every incremental poll, `/notifications?all=true&since=T`
   (one cheap call), used only for discovery of issues I merely subscribed to; skipped when
   the token cannot read notifications (fine-grained tokens).
-- **GitLab**: `/issues` and `/merge_requests` with `scope=all`, author / assignee /
-  reviewer filters, `updated_after=T`.
-- **Forgejo**: `/repos/issues/search` with `since=T` and created / assigned / mentioned.
-- **Bugzilla**: `/rest/bug?last_change_time=T` matching my email as reporter, assignee
-  or CC; item fetch uses `/rest/bug/:id`, `/comment`, `/history`, `/attachment`.
+- **GitLab** (token required: these endpoints refuse anonymous requests):
+  `/merge_requests` (author / assignee / reviewer) and `/issues` (author / assignee) with
+  `scope=all` and `updated_after=T` (first run: `state=opened`); to-dos (mentions, direct
+  addressing; first run: pending ones, later: the newest page of pending and done ones);
+  my "commented" contribution events (first run: the last 90 days, whatever the state);
+  and the `known` items, checked per project with `iids[]` + `updated_after=T`, since
+  GitLab has no "involves" filter. Item fetch: the MR/issue, its notes (comments, and
+  system notes for pushes, approvals, review requests and assignments), and its
+  resource state / label / milestone events. Maintainer = project member with Developer
+  access or more.
+- **Forgejo** (token required: anonymous searches ignore the "me" flags):
+  `/repos/issues/search` with `since=T` (first run: `state=open`) and each of created /
+  assigned / mentioned / review_requested / reviewed, plus `/notifications` (also on the
+  first run, open items only), which covers items I commented on; skipped when the token
+  cannot read notifications. Item fetch: issue, timeline, PR, reviews, combined commit
+  status. Maintainer = repo owner, a user with write access (the repo's assignees list), or
+  the author of an official review.
+- **Bugzilla** (API key optional; sent as `api_key` in the query, since Bugzilla 5.0 ignores
+  the header, and kept out of logged URLs): `/rest/bug` with buglist-style email criteria
+  (my login as reporter, assignee, CC, QA contact or commenter) and `last_change_time=T`
+  (first run: `resolution=---`); item fetch uses `/rest/bug/:id`, `/comment`, `/history`,
+  `/attachment`. Maintainer = the bug's assignee, or an email in the instance's
+  `maintainer_domains`. An assignee change is reported (someone took the bug). A bug I may
+  no longer see (401, code 102) counts as gone.
 
 Known items also include everything in `items.yaml` (non-manual), which are fetched when
 discovery reports them or on first sight.
@@ -163,6 +184,7 @@ instances:
     url: https://bugs.freebsd.org/bugzilla
     user: lapo@example.org
     token_env: FREEBSD_BZ_KEY
+    maintainer_domains: [freebsd.org]  # Bugzilla: committers' comments count as maintainer's
   # …
 
 filter:
