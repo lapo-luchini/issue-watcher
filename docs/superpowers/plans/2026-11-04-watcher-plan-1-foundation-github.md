@@ -428,12 +428,12 @@ filter:
 `;
 
 test("parses instances, strips trailing slash, resolves tokens", () => {
-  const cfg = parseConfig(yaml, { GITHUB_TOKEN: "ghp_x" });
-  expect(cfg.instances[0]).toEqual({ id: "github", type: "github", url: "https://api.github.com", user: "lapo", token: "ghp_x" });
+  const cfg = parseConfig(yaml, { GITHUB_TOKEN: "dummy" });
+  expect(cfg.instances[0]).toEqual({ id: "github", type: "github", url: "https://api.github.com", user: "lapo", token: "dummy" });
 });
 
 test("missing token disables the instance instead of failing", () => {
-  const cfg = parseConfig(yaml, { GITHUB_TOKEN: "ghp_x" });
+  const cfg = parseConfig(yaml, { GITHUB_TOKEN: "dummy" });
   expect(cfg.instances[1]?.disabledReason).toBe("missing FREEBSD_BZ_KEY in .env");
   expect(cfg.instances[1]?.token).toBeUndefined();
 });
