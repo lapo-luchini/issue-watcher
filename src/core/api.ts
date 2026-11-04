@@ -2,7 +2,7 @@
 // Front ends never touch the Store or items.yaml directly.
 import { join } from "node:path";
 import type { Config } from "./config.ts";
-import { addEntry, commitFile, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
+import { addEntry, commitFile, editIntent, effectivePriority, hasUncommittedChanges, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
 import { itemId, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
@@ -21,6 +21,7 @@ export interface ItemView {
   hasConflicts: boolean;
   labels: string[];
   priority: Priority;
+  defaultPriority: Priority; // what `priority` is without an explicit setting in items.yaml
   muted: boolean;
   note: string | null;
   unread: boolean;
@@ -44,6 +45,7 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
       state: i.stateDetail ? `${i.state} (${i.stateDetail})` : i.state, itemState: i.state, stateDetail: i.stateDetail,
       ciState: i.ciState, hasConflicts: i.hasConflicts, labels: i.labels,
       priority: effectivePriority(entry, i.kind, i.authoredByMe, i.maintainedByMe),
+      defaultPriority: effectivePriority(undefined, i.kind, i.authoredByMe, i.maintainedByMe),
       muted: entry?.muted ?? false, note: entry?.note ?? null,
       unread: i.lastSignalAt !== null && (i.seenAt === null || i.lastSignalAt > i.seenAt),
       lastSignalAt: i.lastSignalAt, lastSignalSummary: i.lastSignalSummary,
@@ -54,7 +56,7 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
     views.push({
       id: itemId(entry.url), url: entry.url, instance: null, kind: "manual", repo: new URL(entry.url).host,
       title: entry.title ?? entry.url, state: "manual", itemState: "manual", stateDetail: null, ciState: null,
-      hasConflicts: false, labels: [], priority: entry.priority ?? "normal",
+      hasConflicts: false, labels: [], priority: entry.priority ?? "normal", defaultPriority: "normal",
       muted: entry.muted, note: entry.note ?? null, unread: false, lastSignalAt: null, lastSignalSummary: null,
     });
   }
@@ -161,8 +163,10 @@ async function rewriteItems(home: string, edit: (text: string) => string, messag
   const before = (await file.exists()) ? await file.text() : "";
   const after = edit(before);
   if (after === before) return { ok: true };
+  // Hand edits not committed yet go into this commit too: say so rather than hide them.
+  const dirty = before !== "" && (await hasUncommittedChanges(home, ITEMS_FILE));
   await Bun.write(path, after);
-  return commitFile(home, ITEMS_FILE, message);
+  return commitFile(home, ITEMS_FILE, dirty ? `${message}\n\nAlso commits earlier changes to ${ITEMS_FILE} that were not committed yet.` : message);
 }
 
 /**

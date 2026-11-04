@@ -149,6 +149,13 @@ export interface CommitResult {
   warning?: string;
 }
 
+/** True when `file` (relative to the git repository `repoDir`) differs from what is committed. */
+export async function hasUncommittedChanges(repoDir: string, file: string): Promise<boolean> {
+  const p = Bun.spawn(["git", "-C", repoDir, "status", "--porcelain", "--", file], { stdout: "pipe", stderr: "ignore" });
+  const [code, out] = await Promise.all([p.exited, new Response(p.stdout).text()]);
+  return code === 0 && out.trim() !== "";
+}
+
 /**
  * Commits one file of the repository at `repoDir` (its path relative to it) with `message`,
  * using the repository's configured identity, leaving anything else staged or changed alone.

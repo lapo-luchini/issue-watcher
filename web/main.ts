@@ -55,7 +55,10 @@ const App = defineComponent({
       try {
         await api.poll();
       } catch (err) {
+        // Not started (e.g. cron's poll is running): there is no new result to report.
         say((err as Error).message === "a poll is already running" ? "A poll is already running" : `Poll not started: ${(err as Error).message}`);
+        await loadStatus();
+        return;
       }
       await loadStatus();
       // Follow the poll until it ends, then show what it found.
@@ -76,7 +79,9 @@ const App = defineComponent({
       await load();
     }
     function replace(updated: ItemView) {
-      items.value = items.value.map((i) => (i.id === updated.id ? updated : i));
+      // Muted while muted items are hidden: it leaves the list now, not at the next refresh.
+      if (updated.muted && !filters.value.muted) items.value = items.value.filter((i) => i.id !== updated.id);
+      else items.value = items.value.map((i) => (i.id === updated.id ? updated : i));
     }
 
     watch(filters, (f) => {

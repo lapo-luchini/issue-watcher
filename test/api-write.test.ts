@@ -37,6 +37,16 @@ test("changeIntent edits the entry in place and commits with a readable message"
   expect(git("log", "-1", "--format=%s")).toBe("watcher: mute foo/bar#42; remove note on foo/bar#42\n");
 });
 
+test("uncommitted hand edits that a change commits along are mentioned in the message", async () => {
+  writeFileSync(join(home, "data/items.yaml"), items() + "  # a comment I added by hand\n");
+  await changeIntent(home, "https://github.com/x/y/issues/1", { muted: true }, canonical);
+  expect(git("log", "-1", "--format=%B").trim()).toBe(
+    "watcher: mute x/y#1\n\nAlso commits earlier changes to data/items.yaml that were not committed yet.");
+  // A clean file gets the plain message.
+  await changeIntent(home, "https://github.com/x/y/issues/1", { muted: false }, canonical);
+  expect(git("log", "-1", "--format=%B").trim()).toBe("watcher: unmute x/y#1");
+});
+
 test("a change that changes nothing makes no commit", async () => {
   const head = git("rev-parse", "HEAD");
   expect(await changeIntent(home, "https://github.com/foo/bar/pull/42", { note: "old" }, canonical)).toEqual({ ok: true });

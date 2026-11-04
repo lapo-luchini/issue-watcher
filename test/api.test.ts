@@ -54,6 +54,9 @@ test("filters, lookup by id, separate state fields", () => {
   expect(a).toMatchObject({ url: A, state: "closed (completed)", itemState: "closed", stateDetail: "completed", labels: ["bug"] });
   expect(getItem(store, intent, itemId("https://lists.example.org/p1"))).toMatchObject({ kind: "manual", itemState: "manual" });
   expect(getItem(store, intent, "nope")).toBeNull();
+  // What the priority would be without an explicit setting, so the UI can go back to it.
+  expect(getItem(store, intent, itemId(C))?.defaultPriority).toBe("important");
+  expect(getItem(store, intent, itemId(A))?.defaultPriority).toBe("normal");
 });
 
 test("itemEvents: signal only, or everything with reasons, newest first", () => {

@@ -43,8 +43,12 @@ export const ItemRow = defineComponent({
         busy.value = false;
       }
     }
-    const toggleStar = () => change({ priority: props.item.priority === "important" ? "normal" : "important" },
-      props.item.priority === "important" ? "No longer important" : "Marked important");
+    function toggleStar() {
+      const target = props.item.priority === "important" ? "normal" : "important";
+      // Back to the default clears the setting, rather than pinning it in items.yaml.
+      return change({ priority: target === props.item.defaultPriority ? null : target },
+        target === "important" ? "Marked important" : "No longer important");
+    }
     const toggleMute = () => change({ muted: !props.item.muted }, props.item.muted ? "Unmuted" : "Muted");
     function editNote() {
       noteDraft.value = props.item.note ?? "";
