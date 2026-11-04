@@ -3,6 +3,8 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_FILTER } from "../src/core/config.ts";
+import { refilter } from "../src/core/poller.ts";
 import { itemId, Store, type EventRow, type ItemRow } from "../src/core/store.ts";
 
 let store: Store;
@@ -81,20 +83,39 @@ test("waits for a busy database instead of failing at once", () => {
 test("caches from before is_baseline and first_since are upgraded in place", () => {
   const path = join(mkdtempSync(join(tmpdir(), "watcher-store-")), "cache.sqlite");
   const old = new Database(path);
-  old.exec(`CREATE TABLE events (item_url TEXT NOT NULL, event_key TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL,
+  old.exec(`CREATE TABLE items (url TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, instance TEXT NOT NULL, kind TEXT NOT NULL,
+    repo TEXT NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL, state_detail TEXT, ci_state TEXT,
+    has_conflicts INTEGER NOT NULL DEFAULT 0, authored_by_me INTEGER NOT NULL DEFAULT 0,
+    labels_json TEXT NOT NULL DEFAULT '[]', last_signal_at TEXT, last_signal_summary TEXT,
+    seen_at TEXT, baseline_at TEXT NOT NULL, fetched_at TEXT NOT NULL, snapshot_json TEXT);
+    CREATE TABLE events (item_url TEXT NOT NULL, event_key TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL,
     actor_role TEXT NOT NULL, at TEXT NOT NULL, detected_at TEXT NOT NULL, excerpt TEXT, details_json TEXT,
     is_signal INTEGER NOT NULL, reason TEXT NOT NULL, PRIMARY KEY (item_url, event_key));
     CREATE TABLE retry (instance TEXT NOT NULL, item_url TEXT NOT NULL, kind TEXT NOT NULL, attempts INTEGER NOT NULL,
     last_error TEXT NOT NULL, PRIMARY KEY (instance, item_url));
+    INSERT INTO items (url, id, instance, kind, repo, title, state, baseline_at, fetched_at)
+      VALUES ('${url}', '${itemId(url)}', 'github', 'pr', 'foo/bar', 'Fix build', 'open', '${item.baselineAt}', '${item.baselineAt}');
+    INSERT INTO events VALUES ('${url}', 'c:old', 'comment', 'maint', 'maintainer', '2026-10-01T00:00:00.000Z',
+      '${item.baselineAt}', 'Old history', NULL, 1, 'signal:maintainer-comment');
+    INSERT INTO events VALUES ('${url}', 'c:late', 'comment', 'rando', 'contributor', '2026-11-02T00:00:00.000Z',
+      '2026-11-02T00:00:00.000Z', '+1', NULL, 0, 'noise:pattern:^\\+1$');
     INSERT INTO retry VALUES ('github', '${url}', 'pr', 1, 'boom');`);
   old.close();
   const upgraded = new Store(path);
+  // History stored at the item's baseline becomes baseline; later events do not.
+  expect(upgraded.eventsFor(url, true).map((e) => [e.key, e.isBaseline])).toEqual([["c:late", false], ["c:old", true]]);
+  refilter(upgraded, { instances: [], filter: DEFAULT_FILTER }, new Map());
+  expect(upgraded.getItem(url)?.lastSignalAt).toBeNull();
   expect(upgraded.listRetries("github")).toEqual([
     { instance: "github", itemUrl: url, kind: "pr", attempts: 1, lastError: "boom", firstSince: null },
   ]);
   expect(upgraded.insertEvent(event)).toBe(true);
-  expect(upgraded.eventsFor(url)).toEqual([event]);
+  expect(upgraded.eventsFor(url).map((e) => e.key)).toEqual(["c:1", "c:old"]);
   upgraded.close();
+  // Opening it again must not re-run the backfill on new events.
+  const reopened = new Store(path);
+  expect(reopened.eventsFor(url).find((e) => e.key === "c:1")?.isBaseline).toBe(false);
+  reopened.close();
 });
 
 test("rollback discards writes", () => {

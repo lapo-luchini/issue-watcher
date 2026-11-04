@@ -121,13 +121,20 @@ export class Store {
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
     // Caches created before these columns existed.
-    this.addColumnIfMissing("events", "is_baseline", "INTEGER NOT NULL DEFAULT 0");
+    if (this.addColumnIfMissing("events", "is_baseline", "INTEGER NOT NULL DEFAULT 0")) {
+      // Before the flag, baseline events were those stored when the item was first seen.
+      this.db.exec(`UPDATE events SET is_baseline = 1
+        WHERE detected_at <= (SELECT baseline_at FROM items WHERE items.url = events.item_url)`);
+    }
     this.addColumnIfMissing("retry", "first_since", "TEXT");
   }
 
-  private addColumnIfMissing(table: string, column: string, definition: string): void {
+  /** Returns true if the column was missing and has been added. */
+  private addColumnIfMissing(table: string, column: string, definition: string): boolean {
     const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (!cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    if (cols.some((c) => c.name === column)) return false;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    return true;
   }
 
   getItem(url: string): ItemRow | null {
