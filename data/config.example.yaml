@@ -47,6 +47,22 @@ instances:
   #   user: you@example.org
   #   maintainer_domains: [mozilla.com]
 
+  # Radicle: no token. `url` is a radicle-httpd API base. `user` is your Radicle ID, or a list
+  # of them if you use one per machine. Your own node watches every repo it seeds; on a public
+  # seed, list the repos you send patches to (not ones your node seeds: they would show twice).
+  # On repos where you are a delegate, every open issue and patch is tracked, and incoming
+  # patches are important by default.
+  # - id: radicle-seed
+  #   type: radicle
+  #   url: https://seed.radicle.garden/api/v1
+  #   user: [did:key:z6Mk…laptop, did:key:z6Mk…desktop]
+  #   repos: [rad:z3gqcJUoA1n9HaHKufZs5FCSGazv5]   # heartwood
+  # - id: radicle-mine
+  #   type: radicle
+  #   url: https://radicle.example.org/api/v1      # your node's radicle-httpd
+  #   user: [did:key:z6Mk…laptop, did:key:z6Mk…desktop]
+  #   # web: https://radicle.example.org             # links (default: app.radicle.xyz/nodes/<host>)
+
 # Optional filter tuning (these are the defaults).
 filter:
   noise_patterns: ['^\+1$', '^me too', '^same here', '^any update', '^bump$']

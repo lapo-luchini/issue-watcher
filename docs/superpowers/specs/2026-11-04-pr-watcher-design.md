@@ -18,6 +18,7 @@ All adapters are **multi-instance** (one adapter type, many configured servers):
 | gitlab   | gitlab.com, invent.kde.org, other self-hosted GitLab   |
 | forgejo  | codeberg.org, other self-hosted Forgejo/Gitea          |
 | bugzilla | bugs.freebsd.org, bugs.kde.org, bugzilla.mozilla.org   |
+| radicle  | seed.radicle.garden (listed repos), my own radicle-httpd node |
 | manual   | any URL; listed in the UI, never polled                |
 
 ### Non-goals (v1)
@@ -160,6 +161,19 @@ returned items:
   `/attachment`. Maintainer = the bug's assignee, or an email in the instance's
   `maintainer_domains`. An assignee change is reported (someone took the bug). A bug I may
   no longer see (401, code 102) counts as gone.
+- **Radicle** (no token; `url` is a `radicle-httpd` API, a public seed with a configured
+  `repos:` list, or my own node, which watches every repo it seeds): Radicle has no
+  "involving me" search, no "updated since" filter, no history of state/label/assignee
+  changes, and timestamps come from the authors' clocks. So every poll lists the open issues
+  and open/draft patches of each watched repo (the listings also serve as the fetched data),
+  keeps those involving any of my identities (`user` may be a list of DIDs) — or all of them
+  on repos where I am a delegate, whose incoming patches are important by default — and
+  re-fetches known items the cache has as open but that are no longer listed as open, to see
+  them closed, merged or archived. Revisions are pushes, reviews carry their verdict, merges
+  their merger; a closed/archived state and my assignment are one event each, timed by the
+  item's latest activity. Maintainer = repo delegate. Comments on an already closed item are
+  not seen unless it is reopened. Links point to `app.radicle.xyz/nodes/<host>` unless `web`
+  is set.
 
 Known items also include everything in `items.yaml` (non-manual), which are fetched when
 discovery reports them or on first sight.

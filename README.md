@@ -36,6 +36,12 @@ The watcher only reads, so give every token read-only access.
   (Preferences → API Keys). Optional: public bugs and searches work anonymously; a key is
   needed for bugs only logged-in users can see. `user` is your login email; list your other
   addresses in `emails` so your comments under them are recognized as yours.
+- **Radicle**: no token. Point an instance at a `radicle-httpd` API (`…/api/v1`): a public
+  seed with a `repos:` list for repositories you contribute to, and/or your own node, which
+  watches every repository it seeds. `user` is your Radicle ID (`did:key:z6Mk…`), or a list if
+  you have one per machine. Radicle has no change history: closing an issue shows up as a
+  state change timed by the item's latest activity, and comments on an already closed item
+  are only seen if it is reopened.
 
 ## Commands
 
