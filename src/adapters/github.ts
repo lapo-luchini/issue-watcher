@@ -69,10 +69,19 @@ export class GitHubAdapter implements Adapter {
     return getAllPages<T>(this.inst.url + path, this.headers(), this.http, pick);
   }
 
+  /** Also accepts URLs copied from the browser: a PR tab (/files, /commits, /checks), a query, a #fragment. */
   refFromUrl(url: string): ItemRef | null {
-    const m = url.match(/^(https?:\/\/[^/]+)\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d+)\/?$/);
-    if (!m || m[1] !== this.web) return null;
-    return { url: `${m[1]}/${m[2]}/${m[3]}/${m[4]}/${m[5]}`, instance: this.inst.id, kind: m[4] === "pull" ? "pr" : "issue" };
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      return null;
+    }
+    // URL.origin lowercases the host, so "https://GitHub.com" matches too.
+    if (u.origin !== new URL(this.web).origin) return null;
+    const m = u.pathname.match(/^\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d+)(?:\/(?:files|commits|checks))?\/?$/);
+    if (!m) return null;
+    return { url: `${this.web}/${m[1]}/${m[2]}/${m[3]}/${m[4]}`, instance: this.inst.id, kind: m[3] === "pull" ? "pr" : "issue" };
   }
 
   async discover(since: Date | null): Promise<ItemRef[]> {

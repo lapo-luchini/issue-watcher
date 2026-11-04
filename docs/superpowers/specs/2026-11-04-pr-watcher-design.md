@@ -186,6 +186,10 @@ items:
 ```
 
 - Auto-discovered items appear in this file only once the user changes something.
+- On load, non-manual URLs are canonicalized by the instances' adapters (so a URL copied
+  from the browser, with a trailing slash, a PR tab like `/files`, a query or a
+  `#fragment`, still matches); entries no configured instance recognizes are ignored with
+  a warning. Every `url` must be a valid absolute URL.
 - **Priority has two levels**: `important` and `normal`.
   Default: PRs/MRs I authored → `important`; everything else → `normal`.
 - Writes go through the `yaml` Document API to preserve comments and ordering, followed by

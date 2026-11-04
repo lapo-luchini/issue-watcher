@@ -66,6 +66,20 @@ test("refFromUrl accepts only this instance's PR/issue URLs", () => {
   expect(adapter.refFromUrl("https://github.com/foo/bar")).toBeNull();
 });
 
+test("refFromUrl canonicalizes URLs copied from the browser", () => {
+  const { adapter } = fakeGitHub({});
+  for (const u of [
+    `${PR}/`, `${PR}/files`, `${PR}/commits/`, `${PR}/checks?check_run_id=1`, `${PR}?w=1`,
+    `${PR}#issuecomment-123`, "https://GitHub.com/foo/bar/pull/42", `${PR}/files#diff-abc`,
+  ]) {
+    expect(adapter.refFromUrl(u)?.url).toBe(PR);
+  }
+  expect(adapter.refFromUrl("https://github.com/foo/bar/issues/7#top")?.url).toBe("https://github.com/foo/bar/issues/7");
+  expect(adapter.refFromUrl(`${PR}/other`)).toBeNull();
+  expect(adapter.refFromUrl("https://github.com.evil.example/foo/bar/pull/42")).toBeNull();
+  expect(adapter.refFromUrl("not a url")).toBeNull();
+});
+
 test("fetch normalizes a merged PR", async () => {
   const { adapter } = fakeGitHub(prRoutes);
   const snap = await adapter.fetch({ url: PR, instance: "github", kind: "pr" });

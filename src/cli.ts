@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { createAdapter } from "./adapters/index.ts";
 import { listItems, markSeen } from "./core/api.ts";
-import { loadConfig } from "./core/config.ts";
-import { loadIntent } from "./core/intent.ts";
+import { loadConfig, type Config } from "./core/config.ts";
+import { canonicalizeIntent, loadIntent, type Intent } from "./core/intent.ts";
+import type { Adapter, ItemRef } from "./core/model.ts";
 import { pollAll, refilter } from "./core/poller.ts";
 import { Store } from "./core/store.ts";
 
@@ -16,6 +17,28 @@ const USAGE = `usage: watcher <command> [options]
   list [--all] [--muted]             show unread items (--all: every item)
   seen [URL...]                      mark items seen (no URL: all items)
   refilter                           re-run the noise filter over stored events`;
+
+/** Keys items.yaml entries by canonical URL, warning about entries no configured instance recognizes. */
+function canonicalIntent(config: Config, raw: Intent): Intent {
+  const adapters: Adapter[] = [];
+  for (const inst of config.instances) {
+    try {
+      adapters.push(createAdapter(inst));
+    } catch {
+      // No adapter for this instance type yet: its URLs cannot be recognized.
+    }
+  }
+  const refFromUrl = (url: string): ItemRef | null => {
+    for (const a of adapters) {
+      const ref = a.refFromUrl(url);
+      if (ref) return ref;
+    }
+    return null;
+  };
+  const { intent, unknown } = canonicalizeIntent(raw, refFromUrl);
+  for (const url of unknown) console.error(`watcher: warning: items.yaml: no configured instance recognizes ${url}; ignored`);
+  return intent;
+}
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -41,7 +64,7 @@ async function main(argv: string[]): Promise<number> {
 
   const home = process.env.WATCHER_HOME ?? join(import.meta.dir, "..");
   const config = await loadConfig(join(home, "data/config.yaml"));
-  const intent = await loadIntent(join(home, "data/items.yaml"));
+  const intent = canonicalIntent(config, await loadIntent(join(home, "data/items.yaml")));
   mkdirSync(join(home, "var"), { recursive: true });
   const store = new Store(join(home, "var/cache.sqlite"));
   try {
