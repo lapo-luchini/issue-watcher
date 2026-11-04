@@ -15,7 +15,7 @@ const USAGE = `usage: watcher <command> [options]
 
   poll [--instance ID] [--dry-run]   poll forges for changes (--dry-run saves nothing)
   list [--all] [--muted]             show unread items (--all: every item)
-  seen [URL...]                      mark items seen (no URL: all items)
+  seen URL... | seen --all           mark the given items (or all items) seen
   refilter                           re-run the noise filter over stored events`;
 
 /** Keys items.yaml entries by canonical URL, warning about entries no configured instance recognizes. */
@@ -91,8 +91,24 @@ async function main(argv: string[]): Promise<number> {
         return 0;
       }
       case "seen": {
-        console.log(`${markSeen(store, args, new Date())} item(s) marked seen`);
-        return 0;
+        // Marking everything seen must be explicit: a bare `seen` is more likely a mistake.
+        // Exactly one of URLs or --all.
+        if ((args.length === 0 && !values.all) || (args.length > 0 && values.all)) {
+          console.error(USAGE);
+          return 2;
+        }
+        const now = new Date();
+        if (values.all) {
+          console.log(`${markSeen(store, [], now)} item(s) marked seen`);
+          return 0;
+        }
+        let marked = 0;
+        for (const url of args) {
+          if (markSeen(store, [url], now) > 0) marked++;
+          else console.error(`watcher: no item with URL ${url} (URLs must be canonical, as shown by 'watcher list --all')`);
+        }
+        console.log(`${marked} item(s) marked seen`);
+        return marked === args.length ? 0 : 1;
       }
       case "refilter": {
         const { changed } = refilter(store, config, intent);

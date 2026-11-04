@@ -325,7 +325,7 @@ proxy with authentication, which is documented in the README.
 ```
 watcher poll [--instance ID] [--dry-run]   one-shot poll; --dry-run prints, writes nothing
 watcher list [--all] [--muted]             unread items (usable before the web UI exists)
-watcher seen [URL...]                      mark items seen (no URL: all)
+watcher seen URL... | --all               mark the given items seen, or all with --all
 watcher serve [--port N]                   HTTP API + SPA
 watcher refilter                           re-run filter over stored events
 ```

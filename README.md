@@ -27,9 +27,11 @@ so issues you only *subscribed to* are not discovered.
 ```
 bun run watcher poll [--instance ID] [--dry-run]
 bun run watcher list [--all] [--muted]
-bun run watcher seen [URL...]
+bun run watcher seen URL... | --all
 bun run watcher refilter
 ```
+
+`seen` takes item URLs exactly as `list` shows them; marking everything seen needs `seen --all`.
 
 ## Polling periodically
 
