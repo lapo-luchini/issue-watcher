@@ -1,0 +1,14 @@
+# Instances to poll. Tokens live in .env; token_env names the variable.
+# Only the github type is implemented so far; gitlab, forgejo and bugzilla come next.
+instances:
+  - id: github
+    type: github
+    url: https://api.github.com
+    user: your-github-login
+    token_env: GITHUB_TOKEN
+
+# Optional filter tuning (these are the defaults).
+filter:
+  noise_patterns: ['^\+1$', '^me too', '^same here', '^any update', '^bump$']
+  min_comment_length: 20
+  bot_allowlist: []
