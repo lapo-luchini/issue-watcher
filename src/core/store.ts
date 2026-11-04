@@ -299,6 +299,14 @@ export class Store {
       .run({ name, holder, at: now.toISOString() }).changes > 0;
   }
 
+  /** True when the named lock is held by a live (or unverifiable, not yet stale) holder. */
+  lockHeld(name: string, now: Date, staleMs = 30 * 60_000): boolean {
+    const r = this.db.query("SELECT holder, acquired_at FROM locks WHERE name = $name").get({ name }) as
+      { holder: string; acquired_at: string } | null;
+    if (!r || holderIsGone(r.holder)) return false;
+    return r.acquired_at >= new Date(now.getTime() - staleMs).toISOString();
+  }
+
   releaseLock(name: string): void {
     this.db.query("DELETE FROM locks WHERE name = $name").run({ name });
   }

@@ -103,6 +103,12 @@ test("a lock held by a process that no longer exists on this host is taken over 
   // On another host liveness cannot be checked: only the 30-minute expiry applies.
   expect(store.acquireLock("poll", `${dead}@another-host`, t0)).toBe(true);
   expect(store.acquireLock("poll", lockHolder(), t0)).toBe(false);
+  expect(store.lockHeld("poll", t0)).toBe(true);
+  expect(store.lockHeld("poll", new Date(t0.getTime() + 31 * 60_000))).toBe(false);
+  store.releaseLock("poll");
+  expect(store.lockHeld("poll", t0)).toBe(false);
+  store.acquireLock("poll", `${dead}@${host}`, t0);
+  expect(store.lockHeld("poll", t0)).toBe(false); // its process is gone
 });
 
 test("waits for a busy database instead of failing at once", () => {
