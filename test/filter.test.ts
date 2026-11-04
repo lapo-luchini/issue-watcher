@@ -27,6 +27,7 @@ const cases: [string, NormalizedEvent, Priority, boolean, string][] = [
   ["bot comment", ev("comment", "bot", "This issue is stale", "stale[bot]"), "important", false, "noise:bot"],
   ["bot by name only", ev("comment", "unknown", "Coverage report: 87% of lines covered", "codecov"), "important", false, "noise:bot"],
   ["allowlisted bot", ev("comment", "bot", "Build failed on FreeBSD 14 amd64", "ci-reporter[bot]"), "important", true, "signal:comment"],
+  ["allowlist ignores case", ev("comment", "bot", "Build failed on FreeBSD 14 amd64", "CI-Reporter[bot]"), "important", true, "signal:comment"],
   ["own comment", ev("comment", "me", "Rebased on main, please take another look."), "important", false, "noise:own"],
   ["review", ev("review", "contributor", ""), "normal", true, "signal:review"],
   ["state change by bot still counts", ev("state", "bot", undefined, "stale[bot]"), "normal", true, "signal:state"],

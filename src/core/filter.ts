@@ -40,7 +40,9 @@ const noise = (why: string): Verdict => ({ isSignal: false, reason: `noise:${why
 
 export function classify(ev: NormalizedEvent, priority: Priority, cfg: FilterConfig): Verdict {
   if (ev.actorRole === "me") return noise("own");
-  const bot = (ev.actorRole === "bot" || isBot(ev.actor)) && !cfg.botAllowlist.includes(ev.actor);
+  // Logins are case-insensitive on every forge (Bugzilla reports e.g. "bugzilla@FreeBSD.org").
+  const allowed = cfg.botAllowlist.some((b) => b.toLowerCase() === ev.actor.toLowerCase());
+  const bot = (ev.actorRole === "bot" || isBot(ev.actor)) && !allowed;
   if (IMPORTANT_ONLY.has(ev.kind)) {
     return priority === "important" ? signal(ev.kind) : { isSignal: false, reason: `low-priority:${ev.kind}` };
   }
