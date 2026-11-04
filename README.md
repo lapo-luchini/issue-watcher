@@ -18,9 +18,13 @@ bun run watcher poll                           # first real run: records history
 
 ### GitHub token
 
-Use a **classic** personal access token with the `repo` scope (or only `public_repo`) and
-the `notifications` scope. Fine-grained tokens work too, but they cannot read notifications,
-so issues you only *subscribed to* are not discovered.
+The watcher only reads. Use a **classic** personal access token with just the
+`notifications` scope: public repositories, search and CI status need no scope at all.
+(Don't pick `public_repo` or `repo`: those grant write access. `repo` is only needed to
+watch private repositories.)
+
+Fine-grained tokens with "Public repositories (read-only)" access work too, but they cannot
+read notifications, so issues you only *subscribed to* are not discovered.
 
 ## Commands
 
