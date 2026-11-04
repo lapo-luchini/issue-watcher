@@ -49,6 +49,8 @@ const SEARCH_FLAGS = ["created", "assigned", "mentioned", "review_requested", "r
 const REVIEW_STATES: Record<string, string> = {
   APPROVED: "approved", REQUEST_CHANGES: "changes_requested", COMMENT: "commented",
 };
+/** How far back the first run reads notifications (as GitLab's adapter does for comment events). */
+const FIRST_RUN_DAYS = 90;
 // Forgejo's default WORK_IN_PROGRESS_PREFIXES; only used when the API has no `draft` field.
 const WIP_TITLE = /^\s*(wip:|\[wip\])/i;
 
@@ -59,7 +61,11 @@ export class ForgejoAdapter implements Adapter {
   /** "owner/repo" → lowercase logins with write access; null when the list is unreadable. */
   private readonly writers = new Map<string, Set<string> | null>();
 
-  constructor(private readonly inst: InstanceConfig, private readonly http: HttpDeps = defaultHttp) {
+  constructor(
+    private readonly inst: InstanceConfig,
+    private readonly http: HttpDeps = defaultHttp,
+    private readonly now: () => Date = () => new Date(), // injectable for tests
+  ) {
     this.web = inst.url.replace(/\/api\/v1$/, "");
     this.webPrefix = new URL(this.web).pathname.replace(/\/$/, "");
     this.me = inst.user.toLowerCase();
@@ -119,9 +125,12 @@ export class ForgejoAdapter implements Adapter {
    * Items I commented on or subscribed to are not matched by any search flag; Forgejo notifies
    * their watchers (commenting watches an item), so notifications cover them. Also on the first
    * run, keeping only open items, as the searches do. null when the token cannot read them.
+   * The first run reads the last FIRST_RUN_DAYS only: `all=true` would otherwise page through
+   * every notification the account ever received.
    */
   private async participating(since: Date | null): Promise<string[] | null> {
-    const when = since ? `&since=${encodeURIComponent(since.toISOString())}` : "";
+    const from = since ?? new Date(this.now().getTime() - FIRST_RUN_DAYS * 86_400_000);
+    const when = `&since=${encodeURIComponent(from.toISOString())}`;
     let notes: FjNotification[];
     try {
       notes = await this.all<FjNotification>(`/notifications?all=true${when}&limit=50`);

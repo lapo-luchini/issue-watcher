@@ -11,8 +11,9 @@ const inst: InstanceConfig = { id: "codeberg", type: "forgejo", url: API, user: 
 
 function fake(routes: Record<string, Route>, extra: Partial<InstanceConfig> = {}) {
   const api = fakeApi(API, routes);
-  return { ...api, adapter: new ForgejoAdapter({ ...inst, ...extra }, api.http) };
+  return { ...api, adapter: new ForgejoAdapter({ ...inst, ...extra }, api.http, () => NOW) };
 }
+const NOW = new Date("2026-11-04T12:00:00.000Z");
 
 const PR = "https://codeberg.org/foo/bar/pulls/42";
 const prRef = { url: PR, instance: "codeberg", kind: "pr" as const };
@@ -248,7 +249,8 @@ test("discover: first run searches open items and adds open notified items", asy
     [search("created", "state=open")]: [{ html_url: PR }, { html_url: "https://codeberg.org/x/y/issues/1" }],
     [search("review_requested", "state=open")]: [{ html_url: "https://codeberg.org/r/q/pulls/5" }],
     [search("reviewed", "state=open")]: [{ html_url: PR }],
-    "/notifications?all=true&limit=50": [
+    // 90 days before NOW: the first run does not page through the whole notification history.
+    [`/notifications?all=true&since=${encodeURIComponent("2026-08-06T12:00:00.000Z")}&limit=50`]: [
       { subject: { type: "Issue", state: "open", html_url: "https://codeberg.org/k/l/issues/9" } },
       { subject: { type: "Pull", state: "closed", html_url: "https://codeberg.org/k/l/pulls/10" } },
     ],
