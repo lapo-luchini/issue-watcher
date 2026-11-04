@@ -3396,14 +3396,14 @@ git commit -m "Enable the GitLab, Forgejo and Bugzilla adapters; document their 
 
 ### Task 10: Live smoke test (no tokens needed)
 
-Bugzilla works anonymously, so a real end-to-end run is possible without credentials: an address with no bugs makes discovery cheap, and one real bug listed in `items.yaml` exercises a full fetch. GitLab and Forgejo instances without tokens must fail with a clear message.
+Bugzilla works anonymously, so a real end-to-end run is possible without credentials: `nobody@FreeBSD.org` is involved in very few open bugs, which keeps discovery cheap (written in lowercase on purpose: the adapter must look up the stored spelling), and one real bug listed in `items.yaml` exercises a full fetch. GitLab and Forgejo instances without tokens must fail with a clear message.
 
 - [ ] **Step 1: Create a scratch home outside the repo**
 
 ```bash
 SMOKE=/tmp/watcher-smoke-plan2 && rm -rf "$SMOKE" && mkdir -p "$SMOKE/data" && cd /project/watcher
 printf '%s\n' 'instances:' '  - id: freebsd-bz' '    type: bugzilla' '    url: https://bugs.freebsd.org/bugzilla' \
-  '    user: watcher-smoke@example.invalid' '    maintainer_domains: [freebsd.org]' \
+  '    user: nobody@freebsd.org' '    maintainer_domains: [freebsd.org]' \
   '  - id: codeberg' '    type: forgejo' '    url: https://codeberg.org/api/v1' '    user: watcher-smoke' \
   '  - id: kde' '    type: gitlab' '    url: https://invent.kde.org/api/v4' '    user: watcher-smoke' > "$SMOKE/data/config.yaml"
 printf '%s\n' 'items:' '  - url: https://bugs.freebsd.org/300512' > "$SMOKE/data/items.yaml"
@@ -3414,7 +3414,7 @@ printf '%s\n' 'items:' '  - url: https://bugs.freebsd.org/300512' > "$SMOKE/data
 Run: `WATCHER_HOME="$SMOKE" bun run watcher poll --dry-run; echo "exit=$?"`
 Expected:
 ```
-freebsd-bz: ok, 1 fetched, 0 new signal(s)
+freebsd-bz: ok, 2 fetched, 0 new signal(s)
 codeberg: ERROR Forgejo discovery needs a token: set token_env for this instance (0 fetched, 0 new signal(s))
 kde: ERROR GitLab discovery needs a token: set token_env for this instance (0 fetched, 0 new signal(s))
 (dry run: nothing was saved)
@@ -3424,13 +3424,15 @@ exit=1
 - [ ] **Step 3: Real run of the Bugzilla instance, then the listing**
 
 Run: `WATCHER_HOME="$SMOKE" bun run watcher poll --instance freebsd-bz && WATCHER_HOME="$SMOKE" bun run watcher list --all`
-Expected: `freebsd-bz: ok, 1 fetched, 0 new signal(s)`, then one row for `Ports & Packages/Individual Port(s)  devel/doctest: …` with URL `https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=300512` (canonicalized from the short URL), not marked `●` (first run: baseline). The title and state may have changed since this plan was written.
+Expected: `freebsd-bz: ok, 2 fetched, 0 new signal(s)` (the number may change with `nobody@`'s bugs), then a row for `Ports & Packages/Individual Port(s)  devel/doctest: …` with URL `https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=300512` (canonicalized from the short URL), none marked `●` (first run: baseline). Titles and states may have changed since this plan was written.
+
+Also check that a mistyped login is reported: with `user: watcher-smoke@example.invalid`, the poll says `freebsd-bz: ERROR Bugzilla has no account named 'watcher-smoke@example.invalid': check \`user\` in config.yaml`.
 
 - [ ] **Step 4: Check the stored verdicts**
 
 Run:
 ```bash
-WATCHER_HOME="$SMOKE" bun -e 'import {Database} from "bun:sqlite"; const db = new Database(process.env.WATCHER_HOME + "/var/cache.sqlite"); for (const r of db.query("SELECT kind, actor, actor_role, reason FROM events ORDER BY at").all()) console.log(Object.values(r).join(" | "))'
+WATCHER_HOME="$SMOKE" bun -e 'import {Database} from "bun:sqlite"; const db = new Database(process.env.WATCHER_HOME + "/var/cache.sqlite"); for (const r of db.query("SELECT kind, actor, actor_role, reason FROM events WHERE item_url LIKE ? ORDER BY at").all("%id=300512")) console.log(Object.values(r).join(" | "))'
 ```
 Expected (at least these, in this order; later activity may add rows):
 ```
@@ -3448,6 +3450,17 @@ Clean up: `rm -rf "$SMOKE"`. Nothing to commit.
 The user adds their GitLab, Forgejo and Bugzilla instances to `data/config.yaml` (see `data/config.example.yaml`) and commits it, puts the tokens in `.env` (README, "Tokens"), then runs `bun run watcher poll --dry-run --instance <id>` for each new instance, and a real `poll` twice (baseline, then incremental). The token-only endpoints listed at the top of this plan are exercised for the first time there.
 
 ---
+
+## Outcome and fixes after the final review
+
+Implemented on branch `plan-2-more-forges` exactly as written above (every file compared byte for byte with the tested prototype). The final review then found five more issues, fixed in separate commits with tests:
+- Bugzilla email searches are case-sensitive: `discover` now looks up the login's stored spelling (`/rest/user?names=`, case-insensitive, anonymous), and a mistyped `user` is an error instead of an empty result. Task 10 uses `nobody@freebsd.org` for that reason.
+- A bot assigning *me* on GitHub/GitLab/Forgejo is signal again; only Bugzilla's automatic assignments (events with `details.to`) are noise.
+- `bot_allowlist` matches case-insensitively (Bugzilla reports `bugzilla@FreeBSD.org`).
+- Forgejo's first run reads only the last 90 days of notifications instead of the whole history.
+- Forgejo's known-items fallback matches owner/repo case-insensitively.
+
+Deferred, for plan 3 or later: a URL added by hand with a different owner/repo case than the forge's is tracked as a separate item on GitLab (as on GitHub, already deferred in plan 1); canonicalize to the forge's spelling after the first fetch.
 
 ## Known limitations (accepted; revisit when they bite)
 
