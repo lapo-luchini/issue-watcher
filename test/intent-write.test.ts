@@ -42,11 +42,12 @@ test("editIntent appends a new entry for an item not listed yet", () => {
   expect(parseIntent(out).get("https://github.com/x/y/issues/7")?.priority).toBe("important");
 });
 
-test("clearing every setting removes the entry; manual entries stay", () => {
+test("clearing every setting keeps the entry (a URL alone still means: track this item)", () => {
+  // An item added by URL and not fetched yet would otherwise vanish on mute + unmute.
   const out = editIntent(text, "https://github.com/foo/bar/pull/42", { priority: null, note: null }, canon);
-  expect(out).not.toContain("foo/bar/pull/42");
+  expect(out).toContain("  - url: https://github.com/foo/bar/pull/42/files # copied from the browser\n  - url: https://lists");
   expect(out).toContain("# My overrides: keep this comment.");
-  expect([...parseIntent(out).keys()]).toEqual(["https://lists.example.org/msg1.html"]);
+  expect([...parseIntent(out).keys()]).toEqual(["https://github.com/foo/bar/pull/42/files", "https://lists.example.org/msg1.html"]);
   const manual = editIntent(text, "https://lists.example.org/msg1.html", { muted: false, note: null }, canon);
   expect(parseIntent(manual).get("https://lists.example.org/msg1.html")?.manual).toBe(true);
   // An empty note clears it too.

@@ -8,7 +8,7 @@
 
 ## Tasks
 
-1. **Intent edits.** `editIntent(text, url, change)` returns the new YAML text: sets/clears `priority`, `muted`, `note`, removes an entry left with nothing but its URL, keeps comments and order; `addManual(text, url, title)`. Matching uses canonical URLs, so an entry written as a browser URL is edited in place. `commitFile(repoDir, file, message)` runs `git commit` on that one file; failures (not a repo, no identity, nothing to commit) come back as a warning, the file stays written.
+1. **Intent edits.** `editIntent(text, url, change)` returns the new YAML text: sets/clears `priority`, `muted`, `note`, keeps comments and order, never removes an entry (a URL alone still means "track this"); `addEntry(text, url, {manual, title})`. Matching uses canonical URLs, so an entry written as a browser URL is edited in place. `commitFile(repoDir, file, message)` runs `git commit` on that one file; failures (not a repo, no identity, nothing to commit) come back as a warning, the file stays written.
 2. **API.** `ItemView` gains `id`-based lookup, separate `itemState`/`stateDetail`, labels, instance; `itemEvents(id, includeNoise)`; `instanceStatus()` (last run, last success, error per instance); `setIntent(id or url, change)` and `addItem(url, title)` (validate URL, recognize forge URLs as tracked items, others as manual), both write + commit; `markSeen` by id.
 3. **Poll lock with pid.** The lock holder records `pid@host`; a lock whose process is gone (same host, `kill(pid, 0)` fails) is taken over at once instead of after 30 minutes. Needed now that a long-running server polls next to cron.
 4. **HTTP server.** Routes from the spec (section 6). Binds `127.0.0.1` unless `WATCHER_HOST` is set. Mutating requests must be JSON (`Content-Type: application/json`) and, when the browser sends an `Origin`, come from the page's own origin: blocks cross-site requests (CSRF) and DNS-rebinding tricks against the local server. `POST /api/poll` starts a poll in the background and answers 202, or 409 while one runs (also when cron's poll holds the lock). `items.yaml` is re-read on every request, so hand edits and `git pull`s are picked up; the config is read at start.
@@ -19,7 +19,7 @@
 
 - Adding a URL that a configured instance recognizes creates a normal (tracked) `items.yaml` entry, fetched on the next poll; any other URL becomes a manual item.
 - Commit messages: `watcher: mark <repo>#<n> important|normal`, `watcher: mute|unmute …`, `watcher: note on …`, `watcher: add …`; a short label is derived from the URL.
-- Removing a note or resetting priority to the default removes the key from `items.yaml`; an entry left with only its URL is deleted.
+- Removing a note or resetting priority to the default removes the key from `items.yaml`; the entry itself stays, even with only its URL left (an item added by URL may not have been fetched yet).
 
 ## Outcome
 

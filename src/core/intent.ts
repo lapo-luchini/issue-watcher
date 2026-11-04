@@ -1,6 +1,6 @@
 // data/items.yaml: the user's intent (priority, mute, notes, manual items), keyed by URL.
 // Reading it, editing it without losing comments or order, and committing each change to git.
-import { isMap, isScalar, isSeq, parse, parseDocument, type Document, type YAMLMap, type YAMLSeq } from "yaml";
+import { isMap, isSeq, parse, parseDocument, type Document, type YAMLMap, type YAMLSeq } from "yaml";
 import type { ItemKind, ItemRef, Priority } from "./model.ts";
 
 export interface IntentEntry {
@@ -95,8 +95,8 @@ function urlOf(node: unknown): string | null {
 
 /**
  * Returns `text` with the entry for `url` changed. The entry is found by canonical URL (an
- * entry written as a browser URL is edited in place) or appended. An entry left with nothing
- * but its URL is removed. Comments, order and formatting elsewhere are kept.
+ * entry written as a browser URL is edited in place) or appended. Entries are never removed.
+ * Comments, order and formatting elsewhere are kept.
  */
 export function editIntent(text: string, url: string, change: IntentChange, canonical: (url: string) => string = (u) => u): string {
   const doc = parseDocument(text);
@@ -121,8 +121,8 @@ export function editIntent(text: string, url: string, change: IntentChange, cano
     if (change.note === null || change.note.trim() === "") entry.delete("note");
     else entry.set("note", change.note.trim());
   }
-  const keys = entry.items.map((p) => (isScalar(p.key) ? p.key.value : p.key));
-  if (keys.length === 1 && keys[0] === "url") items.items.splice(items.items.indexOf(entry), 1);
+  // An entry left with only its URL stays: it still asks for the item to be tracked (one
+  // added by URL may not have been fetched yet).
   return doc.toString();
 }
 
