@@ -70,6 +70,10 @@ test("locks exclude, release, and expire", () => {
   expect(store.acquireLock("poll", "c", muchLater)).toBe(true);
 });
 
+test("waits for a busy database instead of failing at once", () => {
+  expect(store.db.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
+});
+
 test("rollback discards writes", () => {
   store.begin();
   store.upsertItem(item);

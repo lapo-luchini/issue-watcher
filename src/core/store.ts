@@ -114,6 +114,8 @@ export class Store {
     // strict: named parameters are bound without the "$" prefix and missing ones throw.
     this.db = new Database(path, { create: true, strict: true });
     this.db.exec("PRAGMA journal_mode = WAL;");
+    // A poll and a CLI/web command may write at the same time: wait for the lock instead of failing.
+    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
     // Caches created before events.is_baseline existed.
     const cols = this.db.query("PRAGMA table_info(events)").all() as { name: string }[];
