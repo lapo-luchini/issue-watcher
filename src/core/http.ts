@@ -47,7 +47,8 @@ function isRateLimited(res: Response): boolean {
 function resetTime(res: Response): Date | null {
   const retryAfter = res.headers.get("retry-after");
   if (retryAfter && /^\d+$/.test(retryAfter)) return new Date(Date.now() + Number(retryAfter) * 1000);
-  const reset = res.headers.get("x-ratelimit-reset");
+  // GitHub sends X-RateLimit-Reset, GitLab RateLimit-Reset; both are epoch seconds.
+  const reset = res.headers.get("x-ratelimit-reset") ?? res.headers.get("ratelimit-reset");
   if (reset && /^\d+$/.test(reset)) return new Date(Number(reset) * 1000);
   return null;
 }

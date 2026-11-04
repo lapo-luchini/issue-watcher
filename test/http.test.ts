@@ -60,6 +60,13 @@ test("rate limits are reported with their reset time", async () => {
   }
 });
 
+test("GitLab-style 429 with RateLimit-Reset", async () => {
+  const res = new Response("", { status: 429, headers: { "ratelimit-reset": "1790000000" } });
+  const err = await getJson("http://x/", {}, fakeHttp([res]).deps).catch((e) => e);
+  expect(err).toBeInstanceOf(RateLimitError);
+  expect((err as RateLimitError).resetAt?.getTime()).toBe(1790000000 * 1000);
+});
+
 test("nextLink", () => {
   expect(nextLink('<https://a/?page=2>; rel="next", <https://a/?page=5>; rel="last"')).toBe("https://a/?page=2");
   expect(nextLink('<https://a/?page=1>; rel="prev"')).toBeNull();
