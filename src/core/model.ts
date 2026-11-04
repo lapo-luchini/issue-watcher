@@ -16,6 +16,11 @@ export interface ItemRef {
   kind: ItemKind;
 }
 
+/** An item already in the cache, as passed to discovery: its ref and its state when last fetched. */
+export interface KnownItem extends ItemRef {
+  state: ItemState;
+}
+
 /** One thing that happened on an item, in forge-independent form. */
 export interface NormalizedEvent {
   key: string; // stable forge-native id, unique within the item
@@ -47,10 +52,11 @@ export interface Adapter {
   refFromUrl(url: string): ItemRef | null;
   /**
    * Items involving me that changed since `since` (null: first run, open items only).
-   * `known` lists this instance's items already in the cache (open, or fetched recently):
-   * forges whose search cannot find items I only commented on check these for updates.
+   * `known` lists this instance's items already in the cache (open, or fetched recently),
+   * with their cached state: forges whose search cannot find items I only commented on, or
+   * cannot report what changed since a date, check these for updates.
    */
-  discover(since: Date | null, known: ItemRef[]): Promise<ItemRef[]>;
+  discover(since: Date | null, known: KnownItem[]): Promise<ItemRef[]>;
   /** Full current view of one item. Throws GoneError if it no longer exists. */
   fetch(ref: ItemRef): Promise<Snapshot>;
 }

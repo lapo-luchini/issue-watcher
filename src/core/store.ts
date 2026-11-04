@@ -1,7 +1,7 @@
 // SQLite cache (var/cache.sqlite, git-ignored, rebuildable): items, events, poll runs, locks, retries.
 // All timestamps are ISO-8601 UTC strings from Date.toISOString(), so they compare correctly as text.
 import { Database } from "bun:sqlite";
-import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Verdict } from "./model.ts";
+import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, KnownItem, Verdict } from "./model.ts";
 
 export interface ItemRow {
   url: string;
@@ -146,11 +146,11 @@ export class Store {
     return this.db.query("SELECT * FROM items").all().map(toItem);
   }
 
-  /** Refs of an instance's items that may still change: open ones, and any fetched since `fetchedSince`. */
-  listKnown(instance: string, fetchedSince: string): ItemRef[] {
-    return this.db.query(`SELECT url, instance, kind FROM items
+  /** An instance's items that may still change: open ones, and any fetched since `fetchedSince`. */
+  listKnown(instance: string, fetchedSince: string): KnownItem[] {
+    return this.db.query(`SELECT url, instance, kind, state FROM items
       WHERE instance = $instance AND state != 'gone' AND (state = 'open' OR fetched_at >= $fetchedSince)
-      ORDER BY url`).all({ instance, fetchedSince }) as ItemRef[];
+      ORDER BY url`).all({ instance, fetchedSince }) as KnownItem[];
   }
 
   upsertItem(i: ItemRow): void {

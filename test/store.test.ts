@@ -50,7 +50,7 @@ test("events dedup by key and filter noise", () => {
   expect(store.eventsFor(url)).toHaveLength(2);
 });
 
-test("listKnown: open items, plus closed ones fetched recently; never gone ones or other instances", () => {
+test("listKnown: open items, plus closed ones fetched recently, with their state; never gone ones or other instances", () => {
   const at = (u: string, state: ItemRow["state"], fetchedAt: string, instance = "github") =>
     store.upsertItem({ ...item, url: u, id: itemId(u), state, fetchedAt, instance });
   at("https://x/open-old", "open", "2026-01-01T00:00:00.000Z");
@@ -59,8 +59,8 @@ test("listKnown: open items, plus closed ones fetched recently; never gone ones 
   at("https://x/gone-recent", "gone", "2026-11-01T00:00:00.000Z");
   at("https://x/other", "open", "2026-11-01T00:00:00.000Z", "gitlab");
   expect(store.listKnown("github", "2026-10-01T00:00:00.000Z")).toEqual([
-    { url: "https://x/merged-recent", instance: "github", kind: "pr" },
-    { url: "https://x/open-old", instance: "github", kind: "pr" },
+    { url: "https://x/merged-recent", instance: "github", kind: "pr", state: "merged" },
+    { url: "https://x/open-old", instance: "github", kind: "pr", state: "open" },
   ]);
 });
 
