@@ -1,7 +1,7 @@
-// SQLite cache (var/cache.sqlite, git-ignored, rebuildable): items, events, poll runs, locks.
+// SQLite cache (var/cache.sqlite, git-ignored, rebuildable): items, events, poll runs, locks, retries.
 // All timestamps are ISO-8601 UTC strings from Date.toISOString(), so they compare correctly as text.
 import { Database } from "bun:sqlite";
-import type { ActorRole, CiState, EventKind, ItemKind, ItemState, Verdict } from "./model.ts";
+import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Verdict } from "./model.ts";
 
 export interface ItemRow {
   url: string;
@@ -47,6 +47,15 @@ export interface PollRun {
   error: string | null;
 }
 
+/** An item whose fetch failed; it is fetched again on the next runs even if discovery no longer reports it. */
+export interface RetryRow {
+  instance: string;
+  itemUrl: string;
+  kind: ItemKind;
+  attempts: number;
+  lastError: string;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS items (
   url TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, instance TEXT NOT NULL, kind TEXT NOT NULL,
@@ -67,6 +76,10 @@ CREATE TABLE IF NOT EXISTS poll_runs (
   finished_at TEXT NOT NULL, cursor TEXT, error TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS retry (
+  instance TEXT NOT NULL, item_url TEXT NOT NULL, kind TEXT NOT NULL, attempts INTEGER NOT NULL,
+  last_error TEXT NOT NULL, PRIMARY KEY (instance, item_url)
+);
 `;
 
 /** Short stable id for URLs in the HTTP API. */
@@ -188,6 +201,25 @@ export class Store {
   recordRun(r: PollRun): void {
     this.db.query(`INSERT INTO poll_runs (instance, started_at, finished_at, cursor, error)
       VALUES ($instance, $startedAt, $finishedAt, $cursor, $error)`).run({ ...r });
+  }
+
+  listRetries(instance: string): RetryRow[] {
+    // `any`: raw SQLite rows, mapped field by field below.
+    const rows = this.db.query("SELECT * FROM retry WHERE instance = $instance ORDER BY item_url").all({ instance }) as any[];
+    return rows.map((r) => ({ instance: r.instance, itemUrl: r.item_url, kind: r.kind, attempts: r.attempts, lastError: r.last_error }));
+  }
+
+  /** Records one more failed fetch of an item and returns its number of failed attempts so far. */
+  recordFailure(instance: string, ref: ItemRef, error: string): number {
+    const r = this.db.query(`
+      INSERT INTO retry (instance, item_url, kind, attempts, last_error) VALUES ($instance, $url, $kind, 1, $error)
+      ON CONFLICT(instance, item_url) DO UPDATE SET attempts = attempts + 1, last_error = excluded.last_error
+      RETURNING attempts`).get({ instance, url: ref.url, kind: ref.kind, error }) as { attempts: number };
+    return r.attempts;
+  }
+
+  clearRetry(instance: string, itemUrl: string): void {
+    this.db.query("DELETE FROM retry WHERE instance = $instance AND item_url = $itemUrl").run({ instance, itemUrl });
   }
 
   /** Locks older than staleMs are assumed to belong to a crashed process and are taken over. */

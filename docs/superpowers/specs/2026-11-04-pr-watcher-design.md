@@ -206,6 +206,8 @@ items:
   details_json, is_signal, reason, is_baseline — unique (item_url, event_key)
 - `poll_runs`: instance, started_at, finished_at, cursor, error
 - `locks`: name (PK), holder, acquired_at — prevents overlapping polls
+- `retry`: instance, item_url, kind, attempts, last_error — PK (instance, item_url); items
+  whose fetch failed, fetched again on the next runs
 
 Rules:
 
@@ -303,8 +305,12 @@ proxy with authentication, which is documented in the README.
 
 - **Per-instance isolation**: one failing instance (down, bad token) does not affect the
   others; its error is recorded in `poll_runs` and shown in the UI.
-- **Cursor advances only on full success** of an instance's run; failed item fetches cause
-  re-discovery next time (dedup keeps this harmless).
+- **Cursor advances whenever discovery succeeded**, so one failing item does not freeze
+  it. Failed item fetches are recorded in the `retry` table and fetched again at the start
+  of each following run (dedup keeps this harmless); a success removes the row, and after
+  5 failed attempts the item is dropped from it (logged). The run is still reported as
+  failed when items failed. Only a 404/410 on the item itself marks it gone; on a
+  sub-request (timeline, commits, CI) it is an ordinary failure.
 - Missing token in `.env` → instance disabled with a clear status message.
 - HTTP: 30 s timeout; retry transient failures (5xx, network) up to 3 times with
   exponential backoff.

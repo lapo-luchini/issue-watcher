@@ -10,6 +10,8 @@ import { summarize } from "./summary.ts";
 /** Each run re-queries this much before the cursor, to tolerate clock skew; event keys dedup the overlap. */
 export const CURSOR_OVERLAP_MS = 5 * 60_000;
 const FETCH_CONCURRENCY = 4;
+/** An item whose fetch fails this many runs in a row is dropped from the retry table. */
+const MAX_FETCH_ATTEMPTS = 5;
 
 export interface PollContext {
   store: Store;
@@ -51,6 +53,9 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
   const result: InstanceResult = { instance: inst.id, ok: false, fetched: 0, newSignals: 0 };
   const cursor = ctx.store.getCursor(inst.id);
   let error: string | null = null;
+  // Stays false if discovery fails or a rate limit stops the run: the next run then
+  // re-queries from the same cursor.
+  let advanceCursor = false;
   try {
     if (inst.disabledReason) throw new Error(inst.disabledReason);
     const adapter = ctx.adapterFor(inst);
@@ -63,33 +68,45 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
       const r = adapter.refFromUrl(entry.url);
       if (r) refs.set(r.url, r);
     }
+    // Items whose fetch failed on earlier runs, even if discovery no longer reports them.
+    for (const r of ctx.store.listRetries(inst.id)) {
+      if (!refs.has(r.itemUrl)) refs.set(r.itemUrl, { url: r.itemUrl, instance: inst.id, kind: r.kind });
+    }
     const failures: string[] = [];
     await forEachLimit([...refs.values()], FETCH_CONCURRENCY, async (ref) => {
       try {
         const snap = await adapter.fetch(ref);
         result.fetched++;
         result.newSignals += applySnapshot(snap, ctx, now(), since, log);
+        ctx.store.clearRetry(inst.id, ref.url);
       } catch (err) {
         if (err instanceof GoneError) {
           result.newSignals += markGone(ref, ctx, now(), log);
+          ctx.store.clearRetry(inst.id, ref.url);
           return;
         }
         if (err instanceof RateLimitError) throw err; // stop the whole instance
-        failures.push(`${ref.url}: ${(err as Error).message}`);
+        const message = (err as Error).message;
+        failures.push(`${ref.url}: ${message}`);
+        if (ctx.store.recordFailure(inst.id, ref, message) >= MAX_FETCH_ATTEMPTS) {
+          ctx.store.clearRetry(inst.id, ref.url);
+          log(`  giving up on ${ref.url} after ${MAX_FETCH_ATTEMPTS} failed attempts: ${message}`);
+        }
       }
     });
+    // Discovery worked, so the cursor can advance: failed items are in the retry table.
+    advanceCursor = true;
     if (failures.length) error = `${failures.length} item(s) failed; first: ${failures[0]}`;
   } catch (err) {
     error = (err as Error).message;
   }
   result.ok = error === null;
   if (error) result.error = error;
-  // The cursor only advances on full success, so failed items are re-discovered next time.
   ctx.store.recordRun({
     instance: inst.id,
     startedAt: startedAt.toISOString(),
     finishedAt: now().toISOString(),
-    cursor: error ? cursor : startedAt.toISOString(),
+    cursor: advanceCursor ? startedAt.toISOString() : cursor,
     error,
   });
   return result;

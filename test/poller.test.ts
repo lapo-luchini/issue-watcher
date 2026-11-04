@@ -148,7 +148,7 @@ test("pollAll: discovery, intent-only items, cursor and overlap", async () => {
   expect(adapter.sinceSeen[1]?.getTime()).toBe(T0.getTime() - CURSOR_OVERLAP_MS);
 });
 
-test("pollAll: a failed item keeps the cursor; gone items get one signal", async () => {
+test("pollAll: a failed item is retried later without holding back the cursor; gone items get one signal", async () => {
   applySnapshot(snapshot(ISSUE, []), ctx, T0, null);
   adapter.discovered = [{ url: PR, instance: "github", kind: "pr" }, { url: ISSUE, instance: "github", kind: "issue" }];
   adapter.snapshots.set(PR, new Error("boom"));
@@ -157,14 +157,43 @@ test("pollAll: a failed item keeps the cursor; gone items get one signal", async
   const [r] = await pollAll(ctx);
   expect(r).toMatchObject({ ok: false, newSignals: 1, error: `1 item(s) failed; first: ${PR}: boom` });
   expect(store.getItem(ISSUE)).toMatchObject({ state: "gone", lastSignalSummary: "→ gone" });
-  expect(store.getCursor("github")).toBeNull();
+  expect(store.getCursor("github")).toBe(minutes(10).toISOString());
+  expect(store.listRetries("github")).toEqual([{ instance: "github", itemUrl: PR, kind: "pr", attempts: 1, lastError: "boom" }]);
+
+  // Next run: discovery no longer reports the PR, but the retry list does.
+  adapter.discovered = [];
+  adapter.snapshots.set(PR, snapshot(PR, []));
+  clock = minutes(20);
+  const [r2] = await pollAll(ctx);
+  expect(r2).toMatchObject({ ok: true, fetched: 1 });
+  expect(store.getItem(PR)).not.toBeNull();
+  expect(store.listRetries("github")).toEqual([]);
 });
 
-test("pollAll: rate limit stops the instance; disabled instances report why", async () => {
+test("pollAll: an item that keeps failing is dropped after 5 attempts", async () => {
+  const lines: string[] = [];
+  ctx.log = (l) => lines.push(l);
+  adapter.discovered = [{ url: PR, instance: "github", kind: "pr" }];
+  adapter.snapshots.set(PR, new Error("boom"));
+  for (let i = 1; i <= 5; i++) {
+    clock = minutes(i * 10);
+    const [r] = await pollAll(ctx);
+    expect(r?.ok).toBe(false);
+    adapter.discovered = [];
+    expect(store.listRetries("github").length).toBe(i < 5 ? 1 : 0);
+  }
+  expect(lines).toEqual([`  giving up on ${PR} after 5 failed attempts: boom`]);
+  clock = minutes(60);
+  expect((await pollAll(ctx))[0]).toMatchObject({ ok: true, fetched: 0 });
+});
+
+test("pollAll: rate limit stops the instance without advancing the cursor; disabled instances report why", async () => {
   adapter.discovered = [{ url: PR, instance: "github", kind: "pr" }];
   adapter.snapshots.set(PR, new RateLimitError(403, "x", null));
   const [r] = await pollAll(ctx);
   expect(r).toMatchObject({ ok: false, error: "rate limited on x" });
+  expect(store.getCursor("github")).toBeNull();
+  expect(store.listRetries("github")).toEqual([]);
   ctx.config = { ...config, instances: [{ ...inst, disabledReason: "missing GITHUB_TOKEN in .env" }] };
   const [d] = await pollAll(ctx);
   expect(d).toMatchObject({ ok: false, error: "missing GITHUB_TOKEN in .env" });

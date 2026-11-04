@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { GitHubAdapter } from "../src/adapters/github.ts";
 import type { InstanceConfig } from "../src/core/config.ts";
-import type { HttpDeps } from "../src/core/http.ts";
+import { GoneError, HttpError, type HttpDeps } from "../src/core/http.ts";
 
 const API = "https://api.github.com";
 const inst = { id: "github", type: "github" as const, url: API, user: "lapo", emails: [] as string[], token: "t" };
@@ -132,6 +132,20 @@ test("own commits are recognized by committer login or configured email", async 
   expect(roles).toEqual({
     "commit:unlinked0000": "me", "commit:committer000": "me", "commit:committermail": "me", "commit:foreign00000": "unknown",
   });
+});
+
+test("only a 404 on the item itself means gone; a 404 on a sub-request is a plain error", async () => {
+  const ref = { url: PR, instance: "github", kind: "pr" as const };
+  const gone = await fakeGitHub({}).adapter.fetch(ref).catch((e) => e);
+  expect(gone).toBeInstanceOf(GoneError);
+  for (const path of ["/repos/foo/bar/issues/42/timeline?per_page=100", "/repos/foo/bar/pulls/42",
+    "/repos/foo/bar/pulls/42/commits?per_page=100", "/repos/foo/bar/commits/abc123/status"]) {
+    const routes: Record<string, unknown> = { ...prRoutes, [path]: 404 };
+    const err = await fakeGitHub(routes).adapter.fetch(ref).catch((e) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err).not.toBeInstanceOf(GoneError);
+    expect(err.status).toBe(404);
+  }
 });
 
 test("issues skip PR-only calls", async () => {
