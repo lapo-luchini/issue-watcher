@@ -22,9 +22,16 @@
 
 Commits on branch `plan-2b-radicle`: known items carry their state; `maintainedByMe`; the adapter with config; docs. Tests: `test/radicle.test.ts` (13 tests) plus core tests. Live check against seed.radicle.garden: as a heartwood delegate, discovery returned its 300 open items and fetching them needed no extra request; as an outsider, nothing; a merged patch fetched by id reported its merger.
 
+## Review and fixes
+
+An independent review found, and these commits fix: known items still listed but no longer involving me (added by hand, unassigned) were never refreshed (now every item known as open is checked, free when listed); items first seen after the first run were filed as baseline by their author-set timestamps (snapshots now declare `timesUnreliable`, and such first sightings count as news); on an own node every repo cost an extra request per poll (the repo listing already carries delegates and names); a close after a reopen was never reported again (the state key counts activity); config mistakes that silently watch nothing are now errors.
+
 ## Known limitations
 
 - Comments on an item that is already closed are not seen unless it is reopened (Radicle cannot say what changed, and re-fetching every closed item each poll would be costly).
-- Closing, reopening and closing again is one state event (no history to tell them apart).
+- Closing, reopening and closing again with no activity in between is one state event; being unassigned and assigned again is not reported (no history to tell them apart).
+- My own close, archive or self-assignment shows as unread: the API does not say who did it.
+- A configured repo the node does not have fails discovery for the whole instance, with an error naming it (no cursor is involved, so nothing is lost once the config is fixed).
+- Listings stop at 20 pages of 100 items per state, without a warning.
 - A repo watched through two instances (seed and own node) appears twice: list on the seed only repos the own node does not seed.
 - No CI state, no mentions (Radicle bodies have no @-mention convention the API exposes).
