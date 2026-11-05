@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Watcher: the lighthouse shining, shown while something is unread. -->
+  <style>
+    .tower { fill: #2f4bd8; }
+    .lamp, .beam { fill: #e0a93b; }
+    @media (prefers-color-scheme: dark) { .tower { fill: #8ea2ff; } }
+  </style>
+  <path class="beam" d="M11 10.5 0 4.5v12Z"/>
+  <path class="beam" d="M21 10.5 32 4.5v12Z"/>
+  <path class="tower" d="M16 1 24 8H8Z"/>
+  <rect class="lamp" x="11" y="8" width="10" height="5"/>
+  <path class="tower" fill-rule="evenodd" d="M10.5 13h11L25 31H7Z M9.24 19.5h13.52l.68 3.5H8.56Z"/>
+</svg>

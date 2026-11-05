@@ -2,6 +2,8 @@
 import { api, type Filters, type ItemView, type Status } from "./api.ts";
 import { ItemRow } from "./components/ItemRow.ts";
 import { TopBar } from "./components/TopBar.ts";
+import iconDark from "./favicon.svg";
+import iconLit from "./favicon-lit.svg";
 import { computed, createApp, defineComponent, onMounted, onUnmounted, ref, watch } from "./vue.ts";
 
 const FILTERS_KEY = "watcher.filters";
@@ -107,6 +109,12 @@ const App = defineComponent({
     const important = computed(() => items.value.filter((i) => i.priority === "important"));
     const rest = computed(() => items.value.filter((i) => i.priority !== "important"));
     const unreadCount = computed(() => items.value.filter((i) => i.unread).length);
+    // The tab shows it too: the lighthouse shines while something is unread, and the title counts.
+    watch(unreadCount, (n) => {
+      const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+      if (icon) icon.href = n > 0 ? iconLit : iconDark;
+      document.title = n > 0 ? `(${n}) Watcher` : "Watcher";
+    }, { immediate: true });
     const filtered = computed(() => filters.value.unread || filters.value.important || filters.value.instance !== "");
     return { filters, items, status, loaded, error, message, important, rest, unreadCount, filtered, load, poll, allSeen, replace, say };
   },

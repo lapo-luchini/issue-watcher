@@ -179,5 +179,7 @@ test("bound to all interfaces, the Host check still applies; allowed names may c
 test("GET / serves the web UI", async () => {
   const res = await api("/");
   expect(res.status).toBe(200);
-  expect(await res.text()).toContain('<div id="app"></div>');
+  const html = await res.text();
+  expect(html).toContain('<div id="app"></div>');
+  expect(html).toMatch(/<link rel="icon" type="image\/svg\+xml" href="[^"]*favicon[^"]*\.svg"/);
 });

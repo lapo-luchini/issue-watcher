@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Watcher: a lighthouse, dark (nothing unread). favicon-lit.svg shines when something is. -->
+  <style>
+    .tower { fill: #2f4bd8; }
+    .lamp { fill: #93a1b0; }
+    @media (prefers-color-scheme: dark) { .tower { fill: #8ea2ff; } }
+  </style>
+  <path class="tower" d="M16 1 24 8H8Z"/>
+  <rect class="lamp" x="11" y="8" width="10" height="5"/>
+  <!-- The band is cut out, so it shows the tab's own colour in light and dark themes. -->
+  <path class="tower" fill-rule="evenodd" d="M10.5 13h11L25 31H7Z M9.24 19.5h13.52l.68 3.5H8.56Z"/>
+</svg>
