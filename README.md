@@ -96,3 +96,7 @@ The poll is a one-shot command, so run it from cron or a systemd timer, e.g. eve
 | `data/items.yaml`  | yes    | your intent: priority, mute, notes, manual items     |
 | `.env`             | no     | tokens                                               |
 | `var/cache.sqlite` | no     | cache; delete it to start over from a quiet baseline |
+
+## License
+
+ISC, see [LICENSE](LICENSE).
