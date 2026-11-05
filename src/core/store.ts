@@ -188,6 +188,12 @@ export class Store {
     return this.db.query("SELECT * FROM items").all().map(toItem);
   }
 
+  /** Per item URL, when its latest event happened (forge clock), news or not; items without events are absent. */
+  lastActivity(): Map<string, string> {
+    const rows = this.db.query("SELECT item_url, MAX(at) AS at FROM events GROUP BY item_url").all() as { item_url: string; at: string }[];
+    return new Map(rows.map((r) => [r.item_url, r.at]));
+  }
+
   /** An instance's items that may still change: open ones, and any fetched since `fetchedSince`. */
   listKnown(instance: string, fetchedSince: string): KnownItem[] {
     return this.db.query(`SELECT url, instance, kind, state FROM items
