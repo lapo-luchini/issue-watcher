@@ -1,5 +1,8 @@
 // data/items.yaml: the user's intent (priority, mute, notes, manual items), keyed by URL.
 // Reading it, editing it without losing comments or order, and committing each change to git.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Document, type YAMLMap, type YAMLSeq } from "yaml";
 import type { ItemKind, ItemRef, Priority } from "./model.ts";
 
@@ -149,29 +152,72 @@ export interface CommitResult {
   warning?: string;
 }
 
-/** True when `file` (relative to the git repository `repoDir`) differs from what is committed. */
-export async function hasUncommittedChanges(repoDir: string, file: string): Promise<boolean> {
-  const p = Bun.spawn(["git", "-C", repoDir, "status", "--porcelain", "--", file], { stdout: "pipe", stderr: "ignore" });
-  const [code, out] = await Promise.all([p.exited, new Response(p.stdout).text()]);
-  return code === 0 && out.trim() !== "";
+/** Runs git in `repoDir`; `env` adds variables (e.g. GIT_INDEX_FILE). Never throws. */
+async function git(repoDir: string, args: string[], env: Record<string, string> = {}) {
+  const p = Bun.spawn(["git", "-C", repoDir, ...args], { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...env } });
+  const [code, out, err] = await Promise.all([p.exited, new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  return { code, out, err };
 }
 
+/** `file` as committed at `rev` (a branch name or HEAD), or null (no such revision or file, not a repository). */
+export async function committedContent(repoDir: string, rev: string, file: string): Promise<string | null> {
+  const r = await git(repoDir, ["show", `${rev === "HEAD" ? rev : `refs/heads/${rev}`}:${file}`]);
+  return r.code === 0 ? r.out : null;
+}
+
+const failed = (r: { code: number; out: string; err: string }): CommitResult =>
+  ({ ok: false, warning: `git commit failed: ${(r.err || r.out).trim().split("\n")[0] || `exit ${r.code}`}` });
+
 /**
- * Commits one file of the repository at `repoDir` (its path relative to it) with `message`,
- * using the repository's configured identity, leaving anything else staged or changed alone.
+ * Commits one file of the repository at `repoDir` (path relative to it) to `branch`, with
+ * `message` and the repository's configured identity. The branch keeps the user's personal data
+ * (it can stay local while the code is published), so this works whatever is checked out:
+ * - on `branch` itself, an ordinary commit of that file (other staged changes stay staged);
+ * - elsewhere, the commit is built with a temporary index and the branch moved to it, leaving
+ *   HEAD, the index and the working tree alone. A missing branch starts from the current commit.
+ * Even a git-ignored file is committed (the public branch may ignore the personal files).
  */
-export async function commitFile(repoDir: string, file: string, message: string): Promise<CommitResult> {
-  const run = async (args: string[]) => {
-    const p = Bun.spawn(["git", "-C", repoDir, ...args], { stdout: "pipe", stderr: "pipe" });
-    const [code, out, err] = await Promise.all([p.exited, new Response(p.stdout).text(), new Response(p.stderr).text()]);
-    return { code, text: (err || out).trim() };
-  };
-  // `add` first: `commit -- file` only accepts files git already knows.
-  for (const args of [["add", "--", file], ["commit", "-q", "-m", message, "--", file]]) {
-    const r = await run(args);
-    if (r.code !== 0) return { ok: false, warning: `git commit failed: ${r.text.split("\n")[0] || `exit ${r.code}`}` };
+export async function commitFile(repoDir: string, file: string, message: string, branch: string): Promise<CommitResult> {
+  const head = await git(repoDir, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  if (head.code === 0 && head.out.trim() === branch) {
+    // `add` first: `commit -- file` only accepts files git already knows.
+    for (const args of [["add", "--force", "--", file], ["commit", "-q", "-m", message, "--", file]]) {
+      const r = await git(repoDir, args);
+      if (r.code !== 0) return failed(r);
+    }
+    return { ok: true };
   }
-  return { ok: true };
+  const ref = `refs/heads/${branch}`;
+  const tip = await git(repoDir, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  const current = await git(repoDir, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+  const parent = tip.code === 0 ? tip.out.trim() : current.code === 0 ? current.out.trim() : null;
+  const blob = await git(repoDir, ["hash-object", "-w", "--", file]);
+  if (blob.code !== 0) return failed(blob);
+
+  const dir = mkdtempSync(join(tmpdir(), "watcher-index-"));
+  try {
+    const env = { GIT_INDEX_FILE: join(dir, "index") };
+    for (const args of [
+      ...(parent ? [["read-tree", parent]] : []),
+      ["update-index", "--add", "--cacheinfo", `100644,${blob.out.trim()},${file}`],
+    ]) {
+      const r = await git(repoDir, args, env);
+      if (r.code !== 0) return failed(r);
+    }
+    const tree = await git(repoDir, ["write-tree"], env);
+    if (tree.code !== 0) return failed(tree);
+    if (parent) {
+      const parentTree = await git(repoDir, ["rev-parse", `${parent}^{tree}`]);
+      if (parentTree.out.trim() === tree.out.trim()) return { ok: false, warning: `git commit failed: nothing to commit on ${branch}` };
+    }
+    const commit = await git(repoDir, ["commit-tree", tree.out.trim(), ...(parent ? ["-p", parent] : []), "-m", message]);
+    if (commit.code !== 0) return failed(commit);
+    // Moves the branch only if nobody else moved it meanwhile (empty old value: it must not exist yet).
+    const update = await git(repoDir, ["update-ref", "-m", "watcher: commit", ref, commit.out.trim(), tip.code === 0 ? tip.out.trim() : ""]);
+    return update.code === 0 ? { ok: true } : failed(update);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /**

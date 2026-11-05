@@ -98,6 +98,14 @@ instances:
     .toThrow("config: instances[0]: 'repos' and 'web' are for radicle instances only");
 });
 
+test("commit_branch: where items.yaml changes are committed, 'config' by default", () => {
+  expect(parseConfig("instances: []", {}).commitBranch).toBe("config");
+  expect(parseConfig("instances: []\ncommit_branch: personal/watcher", {}).commitBranch).toBe("personal/watcher");
+  for (const bad of ["''", "-x", "a..b", "a b", "x.lock", "[1]"]) {
+    expect(() => parseConfig(`instances: []\ncommit_branch: ${bad}`, {})).toThrow("config: 'commit_branch' must be a branch name");
+  }
+});
+
 test("filter settings are type-checked", () => {
   const bad = (filter: string) => () => parseConfig(`instances: []\nfilter:\n  ${filter}`, {});
   expect(bad("min_comment_length: '20'")).toThrow("config: filter: 'min_comment_length' must be a number of characters");

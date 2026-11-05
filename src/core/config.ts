@@ -30,6 +30,8 @@ export interface InstanceConfig {
 export interface Config {
   instances: InstanceConfig[];
   filter: FilterConfig;
+  // The branch changes to items.yaml are committed to, which can stay local while the code is published.
+  commitBranch: string;
 }
 
 export const DEFAULT_FILTER: FilterConfig = {
@@ -116,7 +118,12 @@ export function parseConfig(text: string, env: Record<string, string | undefined
       throw new Error(`config: invalid noise pattern '${p}'`);
     }
   }
-  return { instances, filter };
+  const commitBranch = raw.commit_branch ?? "config";
+  // A plain branch name, as git accepts them (no leading "-", "..", spaces, ".lock" end…).
+  if (typeof commitBranch !== "string" || !/^(?!-)(?!.*\.\.)(?!.*\/\/)[\w.\/-]+(?<![./]|\.lock)$/.test(commitBranch)) {
+    throw new Error("config: 'commit_branch' must be a branch name");
+  }
+  return { instances, filter, commitBranch };
 }
 
 export async function loadConfig(path: string, env: Record<string, string | undefined> = process.env): Promise<Config> {

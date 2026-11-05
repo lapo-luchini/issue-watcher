@@ -91,7 +91,7 @@ test("PATCH /api/items/:id writes items.yaml, commits, and returns the updated i
   expect(item).toMatchObject({ priority: "normal", note: "after 1.4" });
   expect(warning).toBeNull();
   expect(readFileSync(join(home, "data/items.yaml"), "utf8")).toContain(`- url: ${PR}\n    priority: normal\n    note: after 1.4\n`);
-  const log = Bun.spawnSync(["git", "-C", home, "log", "-1", "--format=%s"]).stdout.toString();
+  const log = Bun.spawnSync(["git", "-C", home, "log", "-1", "config", "--format=%s"]).stdout.toString();
   expect(log).toBe("watcher: mark foo/bar#42 normal; note on foo/bar#42\n");
   expect((await send("PATCH", `/api/items/${itemId(PR)}`, { priority: "high" })).status).toBe(400);
   expect((await send("PATCH", `/api/items/${itemId(PR)}`, { color: "red" })).status).toBe(400);

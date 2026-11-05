@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addEntry, commitFile, editIntent, parseIntent } from "../src/core/intent.ts";
+import { addEntry, commitFile, committedContent, editIntent, parseIntent } from "../src/core/intent.ts";
 
 const text = `# My overrides: keep this comment.
 items:
@@ -81,23 +81,72 @@ async function tempRepo(): Promise<string> {
   return dir;
 }
 
-test("commitFile commits only that file, even when it was untracked", async () => {
+const gitOut = (dir: string, ...args: string[]) => Bun.spawnSync(["git", "-C", dir, ...args]).stdout.toString();
+
+/** A repo with one public commit on its main branch, and the personal data files git-ignored there. */
+async function publicRepo(): Promise<string> {
+  const dir = await tempRepo();
+  writeFileSync(join(dir, "README.md"), "public\n");
+  writeFileSync(join(dir, ".gitignore"), "data/items.yaml\n");
+  gitOut(dir, "add", ".");
+  gitOut(dir, "commit", "-qm", "public code");
+  Bun.spawnSync(["mkdir", "-p", join(dir, "data")]);
+  return dir;
+}
+
+test("commitFile commits to the config branch, leaving the checked-out branch, index and other files alone", async () => {
+  const dir = await publicRepo();
+  const main = gitOut(dir, "symbolic-ref", "--short", "HEAD");
+  const mainTip = gitOut(dir, "rev-parse", "HEAD");
+  writeFileSync(join(dir, "data/items.yaml"), "items: []\n");
+  writeFileSync(join(dir, "unrelated.txt"), "not mine to commit\n");
+  gitOut(dir, "add", "unrelated.txt"); // staged by the user: must stay staged, uncommitted
+  expect(await commitFile(dir, "data/items.yaml", "watcher: add x", "config")).toEqual({ ok: true });
+  // The branch is created from the current commit: the code plus the personal data.
+  expect(gitOut(dir, "log", "config", "--format=%s")).toBe("watcher: add x\npublic code\n");
+  expect(gitOut(dir, "show", "config:data/items.yaml")).toBe("items: []\n");
+  expect(gitOut(dir, "diff", "--name-only", "config~1", "config")).toBe("data/items.yaml\n");
+  expect(gitOut(dir, "symbolic-ref", "--short", "HEAD")).toBe(main);
+  expect(gitOut(dir, "rev-parse", "HEAD")).toBe(mainTip);
+  expect(gitOut(dir, "diff", "--cached", "--name-only")).toBe("unrelated.txt\n");
+  // Later changes stack on the branch.
+  writeFileSync(join(dir, "data/items.yaml"), "items:\n  - url: https://x.org/a\n");
+  expect(await commitFile(dir, "data/items.yaml", "watcher: add a\n\nMore text.", "config")).toEqual({ ok: true });
+  expect(gitOut(dir, "log", "config", "--format=%s")).toBe("watcher: add a\nwatcher: add x\npublic code\n");
+  expect(gitOut(dir, "log", "-1", "config", "--format=%b").trim()).toBe("More text.");
+  // Nothing changed since: reported, not thrown.
+  expect((await commitFile(dir, "data/items.yaml", "watcher: noop", "config")).ok).toBe(false);
+});
+
+test("commitFile on the config branch itself is an ordinary commit, leaving a clean tree", async () => {
+  const dir = await publicRepo();
+  gitOut(dir, "switch", "-q", "-c", "mine");
+  writeFileSync(join(dir, "data/items.yaml"), "items: []\n"); // ignored by .gitignore: committed all the same
+  expect(await commitFile(dir, "data/items.yaml", "watcher: add x", "mine")).toEqual({ ok: true });
+  expect(gitOut(dir, "log", "--format=%s")).toBe("watcher: add x\npublic code\n");
+  expect(gitOut(dir, "status", "--porcelain")).toBe("");
+});
+
+test("commitFile in a repository with no commit yet starts the branch from scratch", async () => {
   const dir = await tempRepo();
   Bun.spawnSync(["mkdir", "-p", join(dir, "data")]);
   writeFileSync(join(dir, "data/items.yaml"), "items: []\n");
-  writeFileSync(join(dir, "unrelated.txt"), "not mine to commit\n");
-  expect(await commitFile(dir, "data/items.yaml", "watcher: add x")).toEqual({ ok: true });
-  const log = Bun.spawnSync(["git", "-C", dir, "log", "--format=%s", "--name-only"]).stdout.toString();
-  expect(log).toBe("watcher: add x\n\ndata/items.yaml\n");
-  // Nothing changed since: reported, not thrown.
-  const again = await commitFile(dir, "data/items.yaml", "watcher: noop");
-  expect(again.ok).toBe(false);
+  expect(await commitFile(dir, "data/items.yaml", "watcher: first", "config")).toEqual({ ok: true });
+  expect(gitOut(dir, "log", "config", "--format=%s", "--name-only")).toBe("watcher: first\n\ndata/items.yaml\n");
 });
 
 test("commitFile outside a git repository is a warning", async () => {
   const dir = mkdtempSync(join(tmpdir(), "watcher-nogit-"));
   writeFileSync(join(dir, "items.yaml"), "items: []\n");
-  const r = await commitFile(dir, "items.yaml", "watcher: x");
+  const r = await commitFile(dir, "items.yaml", "watcher: x", "config");
   expect(r.ok).toBe(false);
   expect(r.warning).toContain("git commit failed");
+});
+
+test("committedContent reads a file as committed on a branch, or null", async () => {
+  const dir = await publicRepo();
+  writeFileSync(join(dir, "data/items.yaml"), "items: []\n");
+  expect(await committedContent(dir, "config", "data/items.yaml")).toBeNull(); // no branch yet
+  await commitFile(dir, "data/items.yaml", "watcher: add x", "config");
+  expect(await committedContent(dir, "config", "data/items.yaml")).toBe("items: []\n");
 });

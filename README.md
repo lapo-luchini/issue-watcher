@@ -10,7 +10,7 @@ Requires [Bun](https://bun.sh) ≥ 1.4 (Linux or FreeBSD).
 
 ```sh
 bun install
-cp data/config.example.yaml data/config.yaml   # set your logins, then commit it (no secrets inside)
+cp data/config.example.yaml data/config.yaml   # set your logins; commit it on the config branch (below)
 cp .env.example .env                           # put your tokens here (git-ignored)
 bun run watcher poll --dry-run                 # check instances and tokens; saves nothing
 bun run watcher poll                           # first real run: records history as baseline
@@ -69,8 +69,8 @@ the noise filter dropped, and why), to mute it, or to add a note; the star toggl
 mailing-list post, say) are listed as manual items. "Poll now" polls in the background.
 
 Stars, mutes, notes and added items are written to `data/items.yaml` (comments and order kept)
-and committed to git, one commit per change, with the repository's git identity. If the commit
-fails, the change is still saved and the page says why.
+and committed to git, one commit per change, with the repository's git identity, on the
+`config` branch (see below). If the commit fails, the change is still saved and the page says why.
 
 The server has no authentication: it listens on 127.0.0.1 only, and refuses requests that do
 not come from its own page. To reach it from elsewhere, put it behind a reverse proxy that
@@ -88,14 +88,39 @@ The poll is a one-shot command, so run it from cron or a systemd timer, e.g. eve
 */20 * * * * cd /path/to/watcher && /usr/local/bin/bun src/cli.ts poll >/dev/null
 ```
 
+## Your data and the `config` branch
+
+The code can be published; your configuration and intent should not be. So the watcher
+commits changes to `data/items.yaml` to a local branch, `config` (`commit_branch:` in
+`config.yaml` to name it otherwise), whatever is checked out:
+
+- with `config` checked out, they are ordinary commits;
+- with another branch checked out (say `main`), the file is updated in the working copy and
+  the commit goes to `config` without touching your branch, index or other files; a missing
+  `config` branch is created from the current commit.
+
+On published branches `data/config.yaml` and `data/items.yaml` are git-ignored. The simplest
+setup is to run the watcher from a `config` checkout and keep the code current by merging:
+
+```sh
+git switch -c config                 # once; later: git switch config
+git add -f data/config.yaml && git commit -m "My watcher config"
+git merge main                       # whenever main has new code
+git push origin main                 # publish main only; config stays local
+```
+
+If an older checkout has `data/config.yaml` or `data/items.yaml` committed on `main`, remove them
+there with `git rm --cached data/config.yaml data/items.yaml` (they stay on disk) after
+committing them to `config`.
+
 ## Files
 
-| Path               | In git | Content                                              |
-|--------------------|--------|------------------------------------------------------|
-| `data/config.yaml` | yes    | instances and filter tuning                          |
-| `data/items.yaml`  | yes    | your intent: priority, mute, notes, manual items     |
-| `.env`             | no     | tokens                                               |
-| `var/cache.sqlite` | no     | cache; delete it to start over from a quiet baseline |
+| Path               | In git                  | Content                                              |
+|--------------------|-------------------------|------------------------------------------------------|
+| `data/config.yaml` | on the `config` branch  | instances and filter tuning                          |
+| `data/items.yaml`  | on the `config` branch  | your intent: priority, mute, notes, manual items     |
+| `.env`             | no                      | tokens                                               |
+| `var/cache.sqlite` | no                      | cache; delete it to start over from a quiet baseline |
 
 ## License
 

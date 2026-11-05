@@ -2,7 +2,7 @@
 // Front ends never touch the Store or items.yaml directly.
 import { join } from "node:path";
 import type { Config } from "./config.ts";
-import { addEntry, commitFile, editIntent, effectivePriority, hasUncommittedChanges, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
+import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
 import { itemId, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
@@ -157,26 +157,36 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-async function rewriteItems(home: string, edit: (text: string) => string, message: string): Promise<CommitResult> {
-  const path = join(home, ITEMS_FILE);
+/** Where intent changes go: the watcher's home (a git working copy) and the branch to commit to. */
+export interface IntentRepo {
+  home: string;
+  branch: string; // Config.commitBranch
+}
+
+async function rewriteItems(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
+  const path = join(where.home, ITEMS_FILE);
   const file = Bun.file(path);
   const before = (await file.exists()) ? await file.text() : "";
   const after = edit(before);
   if (after === before) return { ok: true };
   // Hand edits not committed yet go into this commit too: say so rather than hide them.
-  const dirty = before !== "" && (await hasUncommittedChanges(home, ITEMS_FILE));
+  // A branch that does not exist yet will start from the current commit.
+  const committed = (await committedContent(where.home, where.branch, ITEMS_FILE)) ?? (await committedContent(where.home, "HEAD", ITEMS_FILE));
+  const dirty = before !== "" && committed !== null && committed !== before;
   await Bun.write(path, after);
-  return commitFile(home, ITEMS_FILE, dirty ? `${message}\n\nAlso commits earlier changes to ${ITEMS_FILE} that were not committed yet.` : message);
+  const note = `\n\nAlso commits earlier changes to ${ITEMS_FILE} that were not committed yet.`;
+  return commitFile(where.home, ITEMS_FILE, dirty ? message + note : message, where.branch);
 }
 
 /**
  * Changes one item's priority, mute or note in `<home>/data/items.yaml` and commits it.
- * `canonical` maps a URL written in the file to the canonical one (see urlRecognizer).
+ * `canonical` maps a URL written in the file to the canonical one (see urlRecognizer);
+ * `repoName` makes the commit message read better.
  */
 export function changeIntent(
-  home: string, url: string, change: IntentChange, canonical: (url: string) => string, repo?: string,
+  where: IntentRepo, url: string, change: IntentChange, canonical: (url: string) => string, repoName?: string,
 ): Promise<CommitResult> {
-  return serialized(() => rewriteItems(home, (t) => editIntent(t, url, change, canonical), changeMessage(itemLabel(url, repo), change)));
+  return serialized(() => rewriteItems(where, (t) => editIntent(t, url, change, canonical), changeMessage(itemLabel(url, repoName), change)));
 }
 
 /**
@@ -184,7 +194,7 @@ export function changeIntent(
  * poll), any other URL becomes a manual item with `title`. Refuses items already tracked.
  */
 export function addItem(
-  home: string, store: Store, intent: Intent, recognize: (url: string) => ItemRef | null, url: string, title?: string,
+  where: IntentRepo, store: Store, intent: Intent, recognize: (url: string) => ItemRef | null, url: string, title?: string,
 ): Promise<{ url: string; manual: boolean; commit: CommitResult }> {
   if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) return Promise.reject(new Error(`not a web URL: ${url}`));
   const ref = recognize(url);
@@ -194,6 +204,6 @@ export function addItem(
   const message = `watcher: add ${manual ? "manual item " : ""}${itemLabel(canonical)}`;
   return serialized(async () => ({
     url: canonical, manual,
-    commit: await rewriteItems(home, (t) => addEntry(t, canonical, { manual, title: title?.trim() || undefined }), message),
+    commit: await rewriteItems(where, (t) => addEntry(t, canonical, { manual, title: title?.trim() || undefined }), message),
   }));
 }

@@ -4,6 +4,10 @@
 # Bugzilla instances also use them to recognize your own comments and changes.
 emails: [you@example.org]
 
+# Optional: the branch changes made from the web UI are committed to (default: config).
+# Keep it local: this file and items.yaml belong there, not on the branches you publish.
+# commit_branch: config
+
 # Instances to poll. Tokens live in .env; token_env names the variable.
 # `url` is the API base for GitHub, GitLab and Forgejo, and the web base for Bugzilla.
 instances:

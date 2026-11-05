@@ -232,6 +232,11 @@ items:
   one `git commit` per change (message like `watcher: mark foo/bar#42 important`), using the
   repository's configured identity. A failed commit leaves the file written and is reported
   to the UI as a warning.
+- Commits go to a local branch, `config` by default (`commit_branch` in `config.yaml`), so the
+  code can be published while personal data stays private: with that branch checked out they
+  are ordinary commits; otherwise they are built with a temporary index and the branch ref is
+  moved, without touching HEAD, the index or the working tree (a missing branch starts from
+  the current commit). Published branches git-ignore `data/config.yaml` and `data/items.yaml`.
 
 ### `var/cache.sqlite` (git-ignored, rebuildable)
 

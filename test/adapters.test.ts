@@ -12,6 +12,7 @@ const config: Config = {
     { id: "broken", type: "gitlab", url: "not a url", user: "lapo", emails: [] },
   ],
   filter: DEFAULT_FILTER,
+  commitBranch: "config",
 };
 
 test("createAdapter knows every instance type", () => {

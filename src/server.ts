@@ -50,6 +50,7 @@ export async function startServer(opts: ServerOptions) {
   const now = opts.now ?? (() => new Date());
   const config = await loadConfig(join(opts.home, "data/config.yaml"));
   const recognize = urlRecognizer(config);
+  const where = { home: opts.home, branch: config.commitBranch }; // where items.yaml changes are committed
   const canonical = (url: string) => recognize(url)?.url ?? url;
   mkdirSync(join(opts.home, "var"), { recursive: true });
   const store = new Store(join(opts.home, "var/cache.sqlite"));
@@ -171,7 +172,7 @@ export async function startServer(opts: ServerOptions) {
           if (typeof b.url !== "string") throw new HttpError(400, "url is required");
           if (b.title !== undefined && typeof b.title !== "string") throw new HttpError(400, "title must be text");
           try {
-            const r = await addItem(opts.home, store, await intent(), recognize, b.url.trim(), b.title as string | undefined);
+            const r = await addItem(where, store, await intent(), recognize, b.url.trim(), b.title as string | undefined);
             return json({ url: r.url, manual: r.manual, warning: r.commit.warning ?? null }, 201);
           } catch (err) {
             throw new HttpError(400, (err as Error).message);
@@ -182,7 +183,7 @@ export async function startServer(opts: ServerOptions) {
         GET: route(async (req) => json({ item: await itemOr404(req.params.id!) })),
         PATCH: route(async (req) => {
           const item = await itemOr404(req.params.id!);
-          const r = await changeIntent(opts.home, item.url, parseChange(await body(req)), canonical, item.instance ? item.repo : undefined);
+          const r = await changeIntent(where, item.url, parseChange(await body(req)), canonical, item.instance ? item.repo : undefined);
           return json({ item: await itemOr404(item.id), warning: r.warning ?? null });
         }),
       },

@@ -1,3 +1,6 @@
 node_modules/
 var/
 .env
+# Personal data: committed on the (local) config branch only, never on the published ones.
+data/config.yaml
+data/items.yaml
