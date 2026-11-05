@@ -95,7 +95,7 @@ commits changes to `data/items.yaml` to a local branch, `config` (`commit_branch
 `config.yaml` to name it otherwise), whatever is checked out:
 
 - with `config` checked out, they are ordinary commits;
-- with another branch checked out (say `main`), the file is updated in the working copy and
+- with another branch checked out (say `trunk`), the file is updated in the working copy and
   the commit goes to `config` without touching your branch, index or other files; a missing
   `config` branch is created from the current commit.
 
@@ -105,11 +105,11 @@ setup is to run the watcher from a `config` checkout and keep the code current b
 ```sh
 git switch -c config                 # once; later: git switch config
 git add -f data/config.yaml && git commit -m "My watcher config"
-git merge main                       # whenever main has new code
-git push origin main                 # publish main only; config stays local
+git merge trunk                      # whenever trunk has new code
+git push origin trunk                # publish trunk only; config stays local
 ```
 
-If an older checkout has `data/config.yaml` or `data/items.yaml` committed on `main`, remove them
+If an older checkout has `data/config.yaml` or `data/items.yaml` committed on `trunk`, remove them
 there with `git rm --cached data/config.yaml data/items.yaml` (they stay on disk) after
 committing them to `config`.
 
