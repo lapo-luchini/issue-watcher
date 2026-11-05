@@ -157,6 +157,23 @@ test("a patch on a repo I maintain is important by default, and the flag is stor
   expect(store.eventsFor(incoming)[0]?.reason).toBe("signal:ci");
 });
 
+test("pollAll: changed discovery settings (a fixed user name, say) start over with a first run", async () => {
+  const lines: string[] = [];
+  ctx.log = (l) => lines.push(l);
+  await pollAll(ctx); // e.g. with the wrong user: finds nothing, but succeeds and sets a cursor
+  clock = minutes(30);
+  ctx.config = { ...config, instances: [{ ...inst, user: "lapo-real" }] };
+  await pollAll(ctx);
+  // Not "updated since the last poll": that would never find the older items of the new user.
+  expect(adapter.sinceSeen).toEqual([null, null]);
+  expect(lines).toContain("github: discovery settings changed since the last poll: starting over as a first run");
+  // Unchanged settings keep the cursor; the token is not part of them.
+  clock = minutes(60);
+  ctx.config = { ...config, instances: [{ ...inst, user: "lapo-real", token: "another" }] };
+  await pollAll(ctx);
+  expect(adapter.sinceSeen[2]?.getTime()).toBe(minutes(30).getTime() - CURSOR_OVERLAP_MS);
+});
+
 test("pollAll: discovery, intent-only items, cursor and overlap", async () => {
   adapter.discovered = [{ url: PR, instance: "github", kind: "pr" }];
   adapter.snapshots.set(PR, snapshot(PR, []));

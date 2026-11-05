@@ -57,7 +57,13 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
   const log = ctx.log ?? (() => {});
   const startedAt = now();
   const result: InstanceResult = { instance: inst.id, ok: false, fetched: 0, newSignals: 0 };
-  const cursor = ctx.store.getCursor(inst.id);
+  const scope = discoveryScope(inst);
+  const cursor = ctx.store.getCursor(inst.id, scope);
+  if (!cursor && ctx.store.getCursor(inst.id)) {
+    // E.g. the user name was wrong: the old cursor would only look at what changed since, and
+    // never find the older items of the new settings.
+    log(`${inst.id}: discovery settings changed since the last poll: starting over as a first run`);
+  }
   let error: string | null = null;
   // Stays false if discovery fails or a rate limit stops the run: the next run then
   // re-queries from the same cursor.
@@ -120,8 +126,14 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
     finishedAt: now().toISOString(),
     cursor: advanceCursor ? startedAt.toISOString() : cursor,
     error,
+    scope,
   });
   return result;
+}
+
+/** The settings that decide what discovery finds (not the token): a cursor is only valid for them. */
+export function discoveryScope(inst: InstanceConfig): string {
+  return JSON.stringify({ type: inst.type, url: inst.url, users: inst.users ?? [inst.user], repos: inst.repos ?? null });
 }
 
 /**

@@ -48,6 +48,7 @@ export interface PollRun {
   finishedAt: string;
   cursor: string | null;
   error: string | null;
+  scope?: string | null; // the discovery settings the run used (see discoveryScope in poller.ts)
 }
 
 /** An item whose fetch failed; it is fetched again on the next runs even if discovery no longer reports it. */
@@ -167,6 +168,7 @@ export class Store {
     }
     this.addColumnIfMissing("retry", "first_since", "TEXT");
     this.addColumnIfMissing("items", "maintained_by_me", "INTEGER NOT NULL DEFAULT 0");
+    this.addColumnIfMissing("poll_runs", "scope", "TEXT");
   }
 
   /** Returns true if the column was missing and has been added. */
@@ -255,10 +257,15 @@ export class Store {
     return this.db.query("UPDATE items SET seen_at = $at").run({ at }).changes;
   }
 
-  /** The cursor of the latest run (failed runs carry the previous cursor forward). */
-  getCursor(instance: string): string | null {
-    const r = this.db.query("SELECT cursor FROM poll_runs WHERE instance = $instance ORDER BY id DESC LIMIT 1")
-      .get({ instance }) as { cursor: string | null } | null;
+  /**
+   * The cursor of the latest run (failed runs carry the previous cursor forward). With `scope`,
+   * null when that run used other discovery settings: its cursor says nothing about these.
+   * Runs recorded before scopes existed match any scope.
+   */
+  getCursor(instance: string, scope?: string): string | null {
+    const r = this.db.query("SELECT cursor, scope FROM poll_runs WHERE instance = $instance ORDER BY id DESC LIMIT 1")
+      .get({ instance }) as { cursor: string | null; scope: string | null } | null;
+    if (scope !== undefined && r?.scope != null && r.scope !== scope) return null;
     return r?.cursor ?? null;
   }
 
@@ -273,8 +280,8 @@ export class Store {
   }
 
   recordRun(r: PollRun): void {
-    this.db.query(`INSERT INTO poll_runs (instance, started_at, finished_at, cursor, error)
-      VALUES ($instance, $startedAt, $finishedAt, $cursor, $error)`).run({ ...r });
+    this.db.query(`INSERT INTO poll_runs (instance, started_at, finished_at, cursor, error, scope)
+      VALUES ($instance, $startedAt, $finishedAt, $cursor, $error, $scope)`).run({ ...r, scope: r.scope ?? null });
   }
 
   listRetries(instance: string): RetryRow[] {

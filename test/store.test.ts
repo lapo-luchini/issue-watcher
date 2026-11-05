@@ -90,6 +90,15 @@ test("locks exclude, release, and expire", () => {
   expect(store.acquireLock("poll", "c", muchLater)).toBe(true);
 });
 
+test("a cursor belongs to the discovery settings it was made with; runs from before scopes match any", () => {
+  store.recordRun({ instance: "kde", startedAt: "a", finishedAt: "b", cursor: "c0", error: null }); // an old cache
+  expect(store.getCursor("kde", "s1")).toBe("c0");
+  store.recordRun({ instance: "kde", startedAt: "a", finishedAt: "b", cursor: "c1", error: null, scope: "s1" });
+  expect(store.getCursor("kde", "s1")).toBe("c1");
+  expect(store.getCursor("kde", "s2")).toBeNull();
+  expect(store.getCursor("kde")).toBe("c1"); // without a scope: the latest, whatever its settings
+});
+
 test("a lock held by a process that no longer exists on this host is taken over at once", () => {
   const t0 = new Date("2026-11-04T10:00:00Z");
   // A pid that is certainly not running: spawn a process and wait for it to exit.
