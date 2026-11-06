@@ -94,17 +94,24 @@ const App = defineComponent({
       }
       load();
     }, { deep: true });
-    onMounted(() => {
+    function refresh() {
       load();
       loadStatus();
-      refreshTimer = setInterval(() => {
-        if (document.visibilityState === "visible") {
-          load();
-          loadStatus();
-        }
-      }, REFRESH_MS);
+    }
+    // Back to the tab: show the current state now, not at the next tick.
+    function onVisible() {
+      if (document.visibilityState === "visible") refresh();
+    }
+    onMounted(() => {
+      refresh();
+      // Hidden tabs refresh too, so the tab's icon and title tell about news while in the background.
+      refreshTimer = setInterval(refresh, REFRESH_MS);
+      document.addEventListener("visibilitychange", onVisible);
     });
-    onUnmounted(() => clearInterval(refreshTimer));
+    onUnmounted(() => {
+      clearInterval(refreshTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+    });
 
     const important = computed(() => items.value.filter((i) => i.priority === "important"));
     const rest = computed(() => items.value.filter((i) => i.priority !== "important"));
