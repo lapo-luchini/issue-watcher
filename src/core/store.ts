@@ -37,6 +37,11 @@ export interface EventRow {
   actorRole: ActorRole;
   at: string; // when it happened (forge clock)
   detectedAt: string; // when we first stored it (local clock)
+  // Only for forges with unreliable times (Radicle's author clocks, late gossip): `at` moved into
+  // the window in which the event can have arrived, i.e. after the item's previous fetch (it was
+  // not there then) and no later than `detectedAt`. Null when `at` is plausible. `at` is kept as
+  // reported; displays and ordering use approxAt ?? at.
+  approxAt?: string | null;
   excerpt: string | null;
   details: Record<string, unknown> | null;
   isSignal: boolean;
@@ -148,7 +153,7 @@ function toEvent(r: any): EventRow {
     itemUrl: r.item_url, key: r.event_key, kind: r.kind, actor: r.actor, actorRole: r.actor_role,
     at: r.at, detectedAt: r.detected_at, excerpt: r.excerpt,
     details: r.details_json ? JSON.parse(r.details_json) : null,
-    isSignal: r.is_signal === 1, reason: r.reason, isBaseline: r.is_baseline === 1,
+    isSignal: r.is_signal === 1, reason: r.reason, isBaseline: r.is_baseline === 1, approxAt: r.approx_at,
   };
 }
 
@@ -173,6 +178,7 @@ export class Store {
     this.addColumnIfMissing("poll_runs", "scope", "TEXT");
     this.addColumnIfMissing("items", "created_at", "TEXT");
     this.addColumnIfMissing("items", "updated_at", "TEXT");
+    this.addColumnIfMissing("events", "approx_at", "TEXT");
   }
 
   /** Returns true if the column was missing and has been added. */
@@ -192,10 +198,15 @@ export class Store {
     return this.db.query("SELECT * FROM items").all().map(toItem);
   }
 
-  /** Per item URL, when its latest event happened (forge clock), news or not; items without events are absent. */
-  lastActivity(): Map<string, string> {
-    const rows = this.db.query("SELECT item_url, MAX(at) AS at FROM events GROUP BY item_url").all() as { item_url: string; at: string }[];
-    return new Map(rows.map((r) => [r.item_url, r.at]));
+  /**
+   * Per item URL, when its latest event happened (forge clock, or its approximation), news or
+   * not, and whether that time is an approximation; items without events are absent.
+   */
+  lastActivity(): Map<string, { at: string; approx: boolean }> {
+    // SQLite takes the bare approx_at column from the row holding the MAX.
+    const rows = this.db.query(`SELECT item_url, MAX(COALESCE(approx_at, at)) AS at, approx_at IS NOT NULL AS approx
+      FROM events GROUP BY item_url`).all() as { item_url: string; at: string; approx: number }[];
+    return new Map(rows.map((r) => [r.item_url, { at: r.at, approx: r.approx === 1 }]));
   }
 
   /** An instance's items that may still change: open ones, and any fetched since `fetchedSince`. */
@@ -237,14 +248,15 @@ export class Store {
   insertEvent(e: EventRow): boolean {
     const res = this.db.query(`
       INSERT OR IGNORE INTO events (item_url, event_key, kind, actor, actor_role, at, detected_at,
-        excerpt, details_json, is_signal, reason, is_baseline)
+        excerpt, details_json, is_signal, reason, is_baseline, approx_at)
       VALUES ($itemUrl, $key, $kind, $actor, $actorRole, $at, $detectedAt, $excerpt, $details,
-        $isSignal, $reason, $isBaseline)`)
+        $isSignal, $reason, $isBaseline, $approxAt)`)
       .run({
         ...e,
         details: e.details ? JSON.stringify(e.details) : null,
         isSignal: e.isSignal ? 1 : 0,
         isBaseline: e.isBaseline ? 1 : 0,
+        approxAt: e.approxAt ?? null,
       });
     return res.changes > 0;
   }
@@ -252,7 +264,7 @@ export class Store {
   /** Newest first. */
   eventsFor(itemUrl: string, includeNoise = false): EventRow[] {
     const where = includeNoise ? "" : "AND is_signal = 1";
-    return this.db.query(`SELECT * FROM events WHERE item_url = $itemUrl ${where} ORDER BY at DESC`)
+    return this.db.query(`SELECT * FROM events WHERE item_url = $itemUrl ${where} ORDER BY COALESCE(approx_at, at) DESC`)
       .all({ itemUrl }).map(toEvent);
   }
 

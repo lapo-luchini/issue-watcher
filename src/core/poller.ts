@@ -195,6 +195,17 @@ export function applySnapshot(
   // Conflicts: unknown (null/undefined) keeps the previous value.
   const conflicts = snap.hasConflicts ?? prev?.hasConflicts ?? false;
 
+  // Unreliable times (author clocks, late gossip): a new event cannot have happened before the
+  // previous fetch, which did not see it, nor after now. On first sight there is no lower bound.
+  const unreliable = snap.timesUnreliable === true;
+  const approximate = (at: Date): string | null => {
+    if (!unreliable) return null;
+    if (at > now) return nowIso;
+    if (prev && at.toISOString() < prev.fetchedAt) return prev.fetchedAt;
+    return null;
+  };
+  const timeOf = (row: EventRow) => row.approxAt ?? row.at;
+
   let latestSignal: EventRow | null = null;
   let latestOwnAt: string | null = null;
   let newSignals = 0;
@@ -205,17 +216,18 @@ export function applySnapshot(
       at: ev.at.toISOString(), detectedAt: nowIso, excerpt: ev.body ? ev.body.slice(0, 500) : null,
       details: ev.details ?? null, isSignal: verdict.isSignal, reason: verdict.reason,
       // With unreliable timestamps, an item first seen after the first run is news as a whole.
-      isBaseline: !prev && (since === null || (!snap.timesUnreliable && ev.at < since)),
+      isBaseline: !prev && (since === null || (!unreliable && ev.at < since)),
+      approxAt: approximate(ev.at),
     };
     if (!store.insertEvent(row) || row.isBaseline) continue; // already known, or baseline
     if (ev.actorRole === "me") {
-      if (!latestOwnAt || row.at > latestOwnAt) latestOwnAt = row.at;
+      if (!latestOwnAt || timeOf(row) > latestOwnAt) latestOwnAt = timeOf(row);
       continue;
     }
     if (!verdict.isSignal) continue;
     newSignals++;
     log(`  ${snap.repo}: ${snap.title} — ${summarize(row)}`);
-    if (!latestSignal || row.at >= latestSignal.at) latestSignal = row;
+    if (!latestSignal || timeOf(row) >= timeOf(latestSignal)) latestSignal = row;
   }
 
   let lastSignalAt = prev?.lastSignalAt ?? null;
@@ -226,7 +238,14 @@ export function applySnapshot(
     lastSignalSummary = summarize(latestSignal);
   }
   // My own activity after the latest signal means I have already looked at it.
-  if (latestOwnAt && (!latestSignal || latestSignal.at <= latestOwnAt)) seenAt = nowIso;
+  if (latestOwnAt && (!latestSignal || timeOf(latestSignal) <= latestOwnAt)) seenAt = nowIso;
+
+  // With unreliable times: the creation date is kept from the first fetch that had one, capped
+  // at that moment (the item may well predate the previous fetch, so no lower bound); the update
+  // date is left to the events, whose approximations the list shows as such.
+  const created = snap.createdAt?.toISOString() ?? null;
+  const createdAt = !unreliable ? created : (prev?.createdAt ?? (created && created > nowIso ? nowIso : created));
+  const updatedAt = unreliable ? null : (snap.updatedAt?.toISOString() ?? null);
 
   const { events: _events, ...meta } = snap;
   store.upsertItem({
@@ -235,7 +254,7 @@ export function applySnapshot(
     hasConflicts: conflicts, authoredByMe: snap.authoredByMe, maintainedByMe, labels: snap.labels,
     lastSignalAt, lastSignalSummary, seenAt, baselineAt: prev?.baselineAt ?? nowIso,
     fetchedAt: nowIso, snapshotJson: JSON.stringify(meta),
-    createdAt: snap.createdAt?.toISOString() ?? null, updatedAt: snap.updatedAt?.toISOString() ?? null,
+    createdAt, updatedAt,
   });
   return newSignals;
 }

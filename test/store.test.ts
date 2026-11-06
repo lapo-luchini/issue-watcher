@@ -24,6 +24,7 @@ const event: EventRow = {
   itemUrl: url, key: "c:1", kind: "comment", actor: "maint", actorRole: "maintainer",
   at: "2026-11-02T00:00:00.000Z", detectedAt: "2026-11-02T00:05:00.000Z", excerpt: "LGTM",
   details: { x: 1 }, isSignal: true, reason: "signal:maintainer-comment", isBaseline: false,
+  approxAt: "2026-11-02T00:03:00.000Z",
 };
 
 test("itemId is short and stable", () => {

@@ -41,7 +41,11 @@ export const EventList = defineComponent({
       const state = String(e.details?.state ?? "").replaceAll("_", " ");
       return state && state !== "commented" ? `${who} reviewed: ${state}` : `${who} reviewed`;
     }
-    return { events, showFiltered, loading, error, why, quoted, heading, relativeTime, absoluteTime };
+    // Approximate times (Radicle): say so, and what was actually known.
+    const timeTitle = (e: EventView) => e.reportedAt
+      ? `Approximately ${absoluteTime(e.at)}: first seen ${absoluteTime(e.detectedAt)}; its author's clock says ${absoluteTime(e.reportedAt)}`
+      : absoluteTime(e.at);
+    return { events, showFiltered, loading, error, why, quoted, heading, timeTitle, relativeTime, absoluteTime };
   },
   template: `
     <div class="history">
@@ -52,7 +56,9 @@ export const EventList = defineComponent({
       </p>
       <ol class="history__list">
         <li v-for="e in events" :key="e.key" class="event" :class="{ 'event--noise': !e.isSignal, 'event--baseline': e.isBaseline }">
-          <time class="event__time" :datetime="e.at" :title="absoluteTime(e.at)">{{ relativeTime(e.at) }}</time>
+          <time class="event__time" :datetime="e.at"
+            :title="timeTitle(e)"
+            >{{ e.reportedAt ? "≈ " : "" }}{{ relativeTime(e.at) }}</time>
           <div class="event__body">
             <span class="event__summary">{{ heading(e) }}</span>
             <span v-if="!e.isSignal" class="event__why">filtered: {{ why(e.reason) }}</span>

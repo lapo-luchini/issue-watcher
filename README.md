@@ -41,7 +41,10 @@ The watcher only reads, so give every token read-only access.
   watches every repository it seeds. `user` is your Radicle ID (`did:key:z6Mk…`), or a list if
   you have one per machine. Radicle has no change history: closing an issue shows up as a
   state change timed by the item's latest activity, and comments on an already closed item
-  are only seen if it is reopened.
+  are only seen if it is reopened. Its times come from authors' clocks, and changes can reach
+  the node days late: a time that cannot be right (before the previous poll, which did not see
+  the change yet, or in the future) is shown as an approximation, "≈ 2 h ago", with the
+  author's time on hover.
 
 ## Commands
 

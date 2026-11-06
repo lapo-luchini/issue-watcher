@@ -31,6 +31,7 @@ export interface ItemView {
   // items not fetched since these dates were stored. Shown when there is no news.
   createdAt: string | null;
   updatedAt: string | null;
+  updatedApprox: boolean; // updatedAt is an approximation of an unreliable time (Radicle)
 }
 
 export interface ListOptions {
@@ -54,7 +55,8 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
       muted: entry?.muted ?? false, note: entry?.note ?? null,
       unread: i.lastSignalAt !== null && (i.seenAt === null || i.lastSignalAt > i.seenAt),
       lastSignalAt: i.lastSignalAt, lastSignalSummary: i.lastSignalSummary,
-      createdAt: i.createdAt ?? null, updatedAt: i.updatedAt ?? activity.get(i.url) ?? null,
+      createdAt: i.createdAt ?? null, updatedAt: i.updatedAt ?? activity.get(i.url)?.at ?? null,
+      updatedApprox: !i.updatedAt && (activity.get(i.url)?.approx ?? false),
     };
   });
   for (const entry of intent.values()) {
@@ -63,7 +65,8 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
       id: itemId(entry.url), url: entry.url, instance: null, kind: "manual", repo: new URL(entry.url).host,
       title: entry.title ?? entry.url, state: "manual", itemState: "manual", stateDetail: null, ciState: null,
       hasConflicts: false, labels: [], priority: entry.priority ?? "normal", defaultPriority: "normal",
-      muted: entry.muted, note: entry.note ?? null, unread: false, lastSignalAt: null, lastSignalSummary: null, createdAt: null, updatedAt: null,
+      muted: entry.muted, note: entry.note ?? null, unread: false, lastSignalAt: null, lastSignalSummary: null,
+      createdAt: null, updatedAt: null, updatedApprox: false,
     });
   }
   return views
@@ -85,7 +88,8 @@ export interface EventView {
   kind: EventKind;
   actor: string;
   actorRole: ActorRole;
-  at: string;
+  at: string; // when it happened: as reported, or its approximation (see reportedAt)
+  reportedAt: string | null; // the reported time, when `at` is an approximation of it
   detectedAt: string;
   summary: string;
   details: Record<string, unknown> | null;
@@ -98,7 +102,8 @@ export interface EventView {
 /** An item's events, newest first: signal only, or noise too (with the filter's reason). */
 export function itemEvents(store: Store, url: string, includeNoise: boolean): EventView[] {
   return store.eventsFor(url, includeNoise).map((e) => ({
-    key: e.key, kind: e.kind, actor: e.actor, actorRole: e.actorRole, at: e.at, detectedAt: e.detectedAt,
+    key: e.key, kind: e.kind, actor: e.actor, actorRole: e.actorRole,
+    at: e.approxAt ?? e.at, reportedAt: e.approxAt ? e.at : null, detectedAt: e.detectedAt,
     summary: summarize(e), details: e.details, excerpt: e.excerpt, isSignal: e.isSignal, reason: e.reason, isBaseline: e.isBaseline,
   }));
 }

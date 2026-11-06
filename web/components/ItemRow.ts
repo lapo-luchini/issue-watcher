@@ -29,7 +29,7 @@ export const ItemRow = defineComponent({
       const i = props.item;
       return [
         i.lastSignalAt ? `Latest news: ${absoluteTime(i.lastSignalAt)}` : "No news",
-        i.updatedAt ? `Last updated: ${absoluteTime(i.updatedAt)}` : "",
+        i.updatedAt ? `Last updated: ${i.updatedApprox ? "approximately " : ""}${absoluteTime(i.updatedAt)}` : "",
         i.createdAt ? `Created: ${absoluteTime(i.createdAt)}` : "",
       ].filter((s) => s).join("\n");
     });
@@ -99,7 +99,7 @@ export const ItemRow = defineComponent({
           <p v-if="item.note && !editingNote" class="item__note">{{ item.note }}</p>
         </div>
         <time v-if="item.lastSignalAt" class="item__time" :datetime="item.lastSignalAt" :title="dates">{{ relativeTime(item.lastSignalAt) }}</time>
-        <time v-else-if="item.updatedAt" class="item__time item__time--quiet" :datetime="item.updatedAt" :title="dates">{{ relativeTime(item.updatedAt) }}</time>
+        <time v-else-if="item.updatedAt" class="item__time item__time--quiet" :datetime="item.updatedAt" :title="dates">{{ item.updatedApprox ? "≈ " : "" }}{{ relativeTime(item.updatedAt) }}</time>
       </div>
       <div v-if="open" class="item__panel">
         <div class="actions">

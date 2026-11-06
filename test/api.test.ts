@@ -93,6 +93,22 @@ test("itemEvents: signal only, or everything with reasons, newest first", () => 
   expect(all[0]).toMatchObject({ summary: "comment by @bob: text c:2", isSignal: false, reason: "noise:+1", excerpt: "text c:2" });
 });
 
+test("approximate times: shown and ordered by the approximation, the reported time kept alongside", () => {
+  store.upsertItem(row(A, {}));
+  const ev = (key: string, at: string, approxAt: string | null) => ({
+    itemUrl: A, key, kind: "comment" as const, actor: "bob", actorRole: "contributor" as const, at, detectedAt: at,
+    excerpt: null, details: null, isSignal: true, reason: "signal:comment", isBaseline: false, approxAt,
+  });
+  store.insertEvent(ev("c:1", "2026-11-02T00:00:00.000Z", null));
+  store.insertEvent(ev("c:2", "2026-10-01T00:00:00.000Z", "2026-11-03T00:00:00.000Z")); // arrived late
+  expect(itemEvents(store, A, false).map((e) => [e.key, e.at, e.reportedAt])).toEqual([
+    ["c:2", "2026-11-03T00:00:00.000Z", "2026-10-01T00:00:00.000Z"], ["c:1", "2026-11-02T00:00:00.000Z", null],
+  ]);
+  expect(listItems(store, new Map())[0]).toMatchObject({ updatedAt: "2026-11-03T00:00:00.000Z", updatedApprox: true });
+  store.insertEvent(ev("c:3", "2026-11-04T00:00:00.000Z", null));
+  expect(listItems(store, new Map())[0]).toMatchObject({ updatedAt: "2026-11-04T00:00:00.000Z", updatedApprox: false });
+});
+
 test("instanceStatus: last run and last success per configured instance", () => {
   const config: Config = {
     instances: [

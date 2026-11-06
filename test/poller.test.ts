@@ -92,6 +92,34 @@ test("first sight on a later run: with unreliable timestamps, nothing is baselin
   expect(applySnapshot(snapshot(third, [{ ...old }]), ctx, T0, since)).toBe(0);
 });
 
+test("unreliable times: new events are bounded by the previous fetch and now, keeping the reported time", () => {
+  const rad = { timesUnreliable: true, createdAt: minutes(-6000) };
+  const first = comment("c:1", minutes(-6000), "me", "Opened offline long ago.", "me");
+  const ahead = comment("c:2", minutes(30), "contributor", "Written on a clock that runs fast.", "bob");
+  applySnapshot(snapshot(PR, [first, ahead], rad), ctx, T0, null);
+  // First sight: no lower bound, only the cap at now.
+  const byKey = (when: string) => Object.fromEntries(store.eventsFor(PR, true).map((e) => [e.key, e]))[when]!;
+  expect(byKey("c:1")).toMatchObject({ at: minutes(-6000).toISOString(), approxAt: null });
+  expect(byKey("c:2")).toMatchObject({ at: minutes(30).toISOString(), approxAt: T0.toISOString() });
+
+  // An hour later a comment dated last week shows up (gossip): it was not there at the previous fetch.
+  const late = comment("c:3", minutes(-5000), "maintainer", "Reviewed while offline, synced only now.");
+  const t1 = minutes(60);
+  expect(applySnapshot(snapshot(PR, [first, ahead, late], rad), ctx, t1, T0)).toBe(1);
+  expect(byKey("c:3")).toMatchObject({ at: minutes(-5000).toISOString(), approxAt: T0.toISOString() });
+  expect(byKey("c:1").approxAt).toBeNull(); // stored events keep their time
+  // And it is news, though its reported time is a week old.
+  expect(store.getItem(PR)).toMatchObject({ lastSignalSummary: "comment by @maint: Reviewed while offline, synced only now." });
+  // Creation date: from the first fetch; the update date is left to the events.
+  expect(store.getItem(PR)).toMatchObject({ createdAt: minutes(-6000).toISOString(), updatedAt: null });
+
+  // Reliable times are stored as reported.
+  const other = "https://github.com/x/y/pull/9";
+  applySnapshot(snapshot(other, []), ctx, T0, null);
+  applySnapshot(snapshot(other, [late]), ctx, t1, T0);
+  expect(store.eventsFor(other)[0]?.approxAt).toBeNull();
+});
+
 test("new signal after baseline makes the item unread, noise does not", () => {
   applySnapshot(snapshot(PR, []), ctx, T0, null);
   expect(applySnapshot(snapshot(PR, [comment("c:2", minutes(5), "contributor", "+1", "rando")]), ctx, minutes(10), null)).toBe(0);
