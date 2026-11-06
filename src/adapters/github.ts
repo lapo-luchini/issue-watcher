@@ -2,7 +2,7 @@
 import type { InstanceConfig } from "../core/config.ts";
 import { defaultHttp, getAllPages, getJson, HttpError, RateLimitError, type HttpDeps } from "../core/http.ts";
 import type { ActorRole, Adapter, CiState, ItemRef, ItemState, NormalizedEvent, Snapshot } from "../core/model.ts";
-import { notGone, optional, parseUrl } from "./util.ts";
+import { forgeDate, notGone, optional, parseUrl } from "./util.ts";
 
 // Only the fields we use from GitHub's REST responses.
 interface GhUser { login: string; type?: string }
@@ -12,6 +12,8 @@ interface GhIssue {
   state_reason?: string | null;
   user: GhUser | null;
   labels: (string | { name: string })[];
+  created_at: string;
+  updated_at: string;
 }
 interface GhPull { merged: boolean; mergeable_state?: string; head: { sha: string } }
 interface GhCommitPerson { name: string; email: string; date: string }
@@ -150,6 +152,8 @@ export class GitHubAdapter implements Adapter {
       hasConflicts,
       authoredByMe: issue.user?.login.toLowerCase() === this.me,
       labels: issue.labels.map((l) => (typeof l === "string" ? l : l.name)),
+      createdAt: forgeDate(issue.created_at),
+      updatedAt: forgeDate(issue.updated_at),
       events,
     };
   }

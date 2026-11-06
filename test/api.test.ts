@@ -59,20 +59,23 @@ test("filters, lookup by id, separate state fields", () => {
   expect(getItem(store, intent, itemId(A))?.defaultPriority).toBe("normal");
 });
 
-test("lastActivityAt: the latest event of any kind, so quiet items show a date and sort by it", () => {
+test("updatedAt: the item's own, else its latest event of any kind; quiet items sort by it", () => {
   const ev = (url: string, key: string, at: string, isSignal: boolean) => ({
     itemUrl: url, key, kind: "comment" as const, actor: "bob", actorRole: "contributor" as const, at, detectedAt: at,
     excerpt: null, details: null, isSignal, reason: isSignal ? "signal:comment" : "noise:+1", isBaseline: !isSignal,
   });
   store.upsertItem(row(A, { lastSignalAt: "2026-11-02T00:00:00.000Z" }));
-  store.upsertItem(row(B, {})); // no news, but recent (filtered or baseline) activity
+  store.upsertItem(row(B, {})); // no news, no dates of its own (fetched before they were stored), but recent activity
   store.upsertItem(row(C, {})); // never any event
+  store.upsertItem(row(M, { createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-11-04T00:00:00.000Z" }));
   store.insertEvent(ev(A, "c:1", "2026-11-01T23:00:00.000Z", true));
   store.insertEvent(ev(B, "c:1", "2026-10-01T00:00:00.000Z", true));
   store.insertEvent(ev(B, "c:2", "2026-11-03T00:00:00.000Z", false));
+  store.insertEvent(ev(M, "c:1", "2026-11-05T00:00:00.000Z", false)); // its own updatedAt wins
   const views = listItems(store, new Map());
-  expect(views.map((v) => [v.title, v.lastActivityAt])).toEqual([
-    ["B", "2026-11-03T00:00:00.000Z"], ["A", "2026-11-01T23:00:00.000Z"], ["C", null],
+  expect(views.map((v) => [v.title, v.updatedAt, v.createdAt])).toEqual([
+    ["M", "2026-11-04T00:00:00.000Z", "2026-10-01T00:00:00.000Z"], ["B", "2026-11-03T00:00:00.000Z", null],
+    ["A", "2026-11-01T23:00:00.000Z", null], ["C", null, null],
   ]);
 });
 

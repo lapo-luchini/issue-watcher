@@ -27,7 +27,10 @@ export interface ItemView {
   unread: boolean;
   lastSignalAt: string | null;
   lastSignalSummary: string | null;
-  lastActivityAt: string | null; // latest event of any kind (forge clock), shown when there is no news
+  // The item's own dates (forge clock). updatedAt falls back to its latest event, news or not, for
+  // items not fetched since these dates were stored. Shown when there is no news.
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface ListOptions {
@@ -37,7 +40,7 @@ export interface ListOptions {
   instance?: string;
 }
 
-/** Important first, then most recent first (latest news, else latest activity); items without either last. */
+/** Important first, then most recent first (latest news, else last update); items without either last. */
 export function listItems(store: Store, intent: Intent, opts: ListOptions = {}): ItemView[] {
   const activity = store.lastActivity();
   const views: ItemView[] = store.listItems().map((i) => {
@@ -50,7 +53,8 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
       defaultPriority: effectivePriority(undefined, i.kind, i.authoredByMe, i.maintainedByMe),
       muted: entry?.muted ?? false, note: entry?.note ?? null,
       unread: i.lastSignalAt !== null && (i.seenAt === null || i.lastSignalAt > i.seenAt),
-      lastSignalAt: i.lastSignalAt, lastSignalSummary: i.lastSignalSummary, lastActivityAt: activity.get(i.url) ?? null,
+      lastSignalAt: i.lastSignalAt, lastSignalSummary: i.lastSignalSummary,
+      createdAt: i.createdAt ?? null, updatedAt: i.updatedAt ?? activity.get(i.url) ?? null,
     };
   });
   for (const entry of intent.values()) {
@@ -59,7 +63,7 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
       id: itemId(entry.url), url: entry.url, instance: null, kind: "manual", repo: new URL(entry.url).host,
       title: entry.title ?? entry.url, state: "manual", itemState: "manual", stateDetail: null, ciState: null,
       hasConflicts: false, labels: [], priority: entry.priority ?? "normal", defaultPriority: "normal",
-      muted: entry.muted, note: entry.note ?? null, unread: false, lastSignalAt: null, lastSignalSummary: null, lastActivityAt: null,
+      muted: entry.muted, note: entry.note ?? null, unread: false, lastSignalAt: null, lastSignalSummary: null, createdAt: null, updatedAt: null,
     });
   }
   return views
@@ -67,7 +71,7 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
     .filter((v) => (!opts.importantOnly || v.priority === "important") && (!opts.instance || v.instance === opts.instance))
     .sort((a, b) =>
       (a.priority === b.priority ? 0 : a.priority === "important" ? -1 : 1) ||
-      (b.lastSignalAt ?? b.lastActivityAt ?? "").localeCompare(a.lastSignalAt ?? a.lastActivityAt ?? "") ||
+      (b.lastSignalAt ?? b.updatedAt ?? "").localeCompare(a.lastSignalAt ?? a.updatedAt ?? "") ||
       a.title.localeCompare(b.title));
 }
 

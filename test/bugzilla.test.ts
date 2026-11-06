@@ -22,7 +22,7 @@ function fakeBugzilla(routes: Record<string, Route>, extra: Partial<InstanceConf
 
 const BUG = `${WEB}/show_bug.cgi?id=300491`;
 const ref: ItemRef = { url: BUG, instance: "freebsd", kind: "bug" };
-const MAIN = "/bug/300491?include_fields=summary,status,resolution,is_open,product,component,creator,assigned_to,keywords";
+const MAIN = "/bug/300491?include_fields=summary,status,resolution,is_open,product,component,creator,assigned_to,keywords,creation_time,last_change_time";
 
 const comment = (id: number, creator: string, time: string, text: string, attachment_id: number | null = null) =>
   ({ id, creator, creation_time: time, time, text, attachment_id, is_private: false, count: id - 1, bug_id: 300491 });
@@ -35,6 +35,7 @@ const bugRoutes: Record<string, Route> = {
       summary: "archivers/urbackup-server: Update to version 2.5.38", status: "Closed", resolution: "FIXED", is_open: false,
       product: "Ports & Packages", component: "Individual Port(s)", creator: "Me@Example.org",
       assigned_to: "committer@FreeBSD.org", keywords: ["patch"],
+      creation_time: "2026-09-01T10:00:00Z", last_change_time: "2026-10-02T11:00:00Z",
     }],
     faults: [],
   },
@@ -196,6 +197,7 @@ test("fetch normalizes a closed ports PR", async () => {
   expect(snap).toMatchObject({
     ref, repo: "Ports & Packages/Individual Port(s)", title: "archivers/urbackup-server: Update to version 2.5.38",
     state: "closed", stateDetail: "Closed/FIXED", authoredByMe: true, labels: ["patch"],
+    createdAt: new Date("2026-09-01T10:00:00Z"), updatedAt: new Date("2026-10-02T11:00:00Z"),
   });
   expect(snap.ciState).toBeUndefined();
   expect(snap.hasConflicts).toBeUndefined();

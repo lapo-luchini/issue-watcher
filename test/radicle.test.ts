@@ -110,6 +110,8 @@ test("fetch normalizes an issue: comments, closed state, assignment, roles of al
   expect(snap).toMatchObject({
     repo: "heartwood", title: "git-remote-rad should support --signed=if-asked", state: "closed", stateDetail: "solved",
     authoredByMe: true, maintainedByMe: false, labels: ["bug"], ciState: null,
+    // No dates of its own: its first comment and its latest event.
+    createdAt: new Date(T * 1000), updatedAt: new Date((T + 120) * 1000),
   });
   const byKey = Object.fromEntries(snap.events.map((e) => [e.key, e]));
   expect(Object.keys(byKey).sort()).toEqual(["a:me", `c:${hex("a")}`, `c:${hex("b")}`, `c:${ISSUE_ID}`, "s:closed:3"].sort());
@@ -138,6 +140,8 @@ test("fetch normalizes a patch: revisions as pushes, comments, reviews, merge", 
   expect(byKey[`r:${hex("f")}`]?.details).toEqual({ state: "commented" });
   expect(byKey[`m:${hex("c")}`]).toMatchObject({ kind: "state", actor: "lorenz", actorRole: "maintainer", details: { to: "merged" } });
   expect(byKey[`m:${hex("c")}`]?.at.toISOString()).toBe(new Date((T + 900) * 1000).toISOString());
+  expect(snap.createdAt).toEqual(byKey[`rev:${PATCH_ID}`]!.at);
+  expect(snap.updatedAt).toEqual(new Date(Math.max(...snap.events.map((e) => e.at.getTime()))));
 });
 
 test("patch states: draft is open, archived is closed; a rejected review asks for changes", async () => {

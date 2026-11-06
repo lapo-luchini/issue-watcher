@@ -25,6 +25,8 @@ export interface ItemRow {
   baselineAt: string; // first time we saw the item; history before it never counts as unread
   fetchedAt: string;
   snapshotJson: string | null;
+  createdAt?: string | null; // the item's own dates (forge clock); null when unknown or not fetched since they were stored
+  updatedAt?: string | null;
 }
 
 export interface EventRow {
@@ -137,7 +139,7 @@ function toItem(r: any): ItemRow {
     hasConflicts: r.has_conflicts === 1, authoredByMe: r.authored_by_me === 1, maintainedByMe: r.maintained_by_me === 1,
     labels: JSON.parse(r.labels_json), lastSignalAt: r.last_signal_at,
     lastSignalSummary: r.last_signal_summary, seenAt: r.seen_at, baselineAt: r.baseline_at,
-    fetchedAt: r.fetched_at, snapshotJson: r.snapshot_json,
+    fetchedAt: r.fetched_at, snapshotJson: r.snapshot_json, createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
 
@@ -169,6 +171,8 @@ export class Store {
     this.addColumnIfMissing("retry", "first_since", "TEXT");
     this.addColumnIfMissing("items", "maintained_by_me", "INTEGER NOT NULL DEFAULT 0");
     this.addColumnIfMissing("poll_runs", "scope", "TEXT");
+    this.addColumnIfMissing("items", "created_at", "TEXT");
+    this.addColumnIfMissing("items", "updated_at", "TEXT");
   }
 
   /** Returns true if the column was missing and has been added. */
@@ -205,10 +209,10 @@ export class Store {
     this.db.query(`
       INSERT INTO items (url, id, instance, kind, repo, title, state, state_detail, ci_state,
         has_conflicts, authored_by_me, maintained_by_me, labels_json, last_signal_at, last_signal_summary, seen_at,
-        baseline_at, fetched_at, snapshot_json)
+        baseline_at, fetched_at, snapshot_json, created_at, updated_at)
       VALUES ($url, $id, $instance, $kind, $repo, $title, $state, $stateDetail, $ciState,
         $hasConflicts, $authoredByMe, $maintainedByMe, $labels, $lastSignalAt, $lastSignalSummary, $seenAt,
-        $baselineAt, $fetchedAt, $snapshotJson)
+        $baselineAt, $fetchedAt, $snapshotJson, $createdAt, $updatedAt)
       ON CONFLICT(url) DO UPDATE SET instance = excluded.instance, kind = excluded.kind,
         repo = excluded.repo, title = excluded.title, state = excluded.state,
         state_detail = excluded.state_detail, ci_state = excluded.ci_state,
@@ -217,13 +221,15 @@ export class Store {
         labels_json = excluded.labels_json, last_signal_at = excluded.last_signal_at,
         last_signal_summary = excluded.last_signal_summary, seen_at = excluded.seen_at,
         baseline_at = excluded.baseline_at, fetched_at = excluded.fetched_at,
-        snapshot_json = excluded.snapshot_json`)
+        snapshot_json = excluded.snapshot_json, created_at = excluded.created_at, updated_at = excluded.updated_at`)
       .run({
         ...i,
         hasConflicts: i.hasConflicts ? 1 : 0,
         authoredByMe: i.authoredByMe ? 1 : 0,
         maintainedByMe: i.maintainedByMe ? 1 : 0,
         labels: JSON.stringify(i.labels),
+        createdAt: i.createdAt ?? null,
+        updatedAt: i.updatedAt ?? null,
       });
   }
 

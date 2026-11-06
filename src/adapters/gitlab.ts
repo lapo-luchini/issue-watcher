@@ -2,7 +2,7 @@
 import type { InstanceConfig } from "../core/config.ts";
 import { defaultHttp, getAllPages, getJson, type HttpDeps } from "../core/http.ts";
 import type { ActorRole, Adapter, CiState, ItemKind, ItemRef, ItemState, NormalizedEvent, Snapshot } from "../core/model.ts";
-import { mentions, notGone, optional, parseUrl } from "./util.ts";
+import { forgeDate, mentions, notGone, optional, parseUrl } from "./util.ts";
 
 // Only the fields we use from GitLab's REST responses.
 interface GlUser { id: number; username: string; bot?: boolean }
@@ -11,6 +11,8 @@ interface GlItem {
   state: "opened" | "closed" | "merged" | "locked";
   author: GlUser | null;
   labels: string[];
+  created_at: string;
+  updated_at: string;
   draft?: boolean; // merge requests only
   detailed_merge_status?: string; // merge requests only
   has_conflicts?: boolean; // merge requests only
@@ -264,6 +266,8 @@ export class GitLabAdapter implements Adapter {
       hasConflicts,
       authoredByMe: item.author?.username.toLowerCase() === this.me,
       labels: item.labels,
+      createdAt: forgeDate(item.created_at),
+      updatedAt: forgeDate(item.updated_at),
       events,
     };
   }

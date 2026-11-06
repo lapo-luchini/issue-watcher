@@ -4,7 +4,7 @@ import type { InstanceConfig } from "../core/config.ts";
 import { isBot } from "../core/filter.ts";
 import { defaultHttp, getJson, GoneError, HttpError, type FetchFn, type HttpDeps } from "../core/http.ts";
 import type { ActorRole, Adapter, ItemRef, NormalizedEvent, Snapshot } from "../core/model.ts";
-import { notGone, parseUrl } from "./util.ts";
+import { forgeDate, notGone, parseUrl } from "./util.ts";
 
 // Only the fields we use from Bugzilla's REST responses. People are identified by their
 // login, which is an email address (shown in full even to anonymous users on all three targets).
@@ -18,6 +18,8 @@ interface BzBug {
   creator: string;
   assigned_to: string;
   keywords: string[];
+  creation_time: string;
+  last_change_time: string;
 }
 interface BzComment {
   id: number;
@@ -48,7 +50,7 @@ const BUG_NOT_FOUND = 101;
 const BUG_ACCESS_DENIED = 102;
 const PAGE_SIZE = 500; // all three targets return at least this many per search page
 const MAX_PAGES = 20;
-const MAIN_FIELDS = "summary,status,resolution,is_open,product,component,creator,assigned_to,keywords";
+const MAIN_FIELDS = "summary,status,resolution,is_open,product,component,creator,assigned_to,keywords,creation_time,last_change_time";
 /** Bugzilla's own automation account (FreeBSD's auto-assigns ports PRs to their maintainer). */
 const AUTOMATION_LOCAL_PARTS = new Set(["bugzilla"]);
 /** The comment Bugzilla writes for a new attachment: "Created attachment N\n<summary>", then any text the uploader added. */
@@ -235,6 +237,8 @@ export class BugzillaAdapter implements Adapter {
       stateDetail: bug.resolution ? `${bug.status}/${bug.resolution}` : bug.status,
       authoredByMe: this.mine.has(bug.creator.toLowerCase()),
       labels: bug.keywords,
+      createdAt: forgeDate(bug.creation_time),
+      updatedAt: forgeDate(bug.last_change_time),
       events,
     };
   }

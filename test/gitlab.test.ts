@@ -32,6 +32,7 @@ const TOKEN_BOT = user(4, "project_318_bot_0123456789abcdef", true);
 const mrRoutes: Record<string, unknown> = {
   [MRB]: {
     title: "Fix build on FreeBSD", state: "opened", draft: true, author: LAPO, labels: ["bug"],
+    created_at: "2026-10-20T08:00:00Z", updated_at: "2026-11-02T09:30:00Z",
     detailed_merge_status: "mergeable", has_conflicts: false, head_pipeline: { status: "failed" },
   },
   [`${MRB}/notes?sort=asc&per_page=100`]: [
@@ -109,6 +110,7 @@ test("fetch normalizes an MR: comments, system notes, resource events, roles", a
   expect(snap).toMatchObject({
     ref: MR_REF, repo: "kde/apps/konsole", title: "Fix build on FreeBSD", state: "open", stateDetail: "draft",
     ciState: "failure", hasConflicts: false, authoredByMe: true, labels: ["bug"],
+    createdAt: new Date("2026-10-20T08:00:00Z"), updatedAt: new Date("2026-11-02T09:30:00Z"),
   });
   const byKey = Object.fromEntries(snap.events.map((e) => [e.key, e]));
   expect(Object.keys(byKey).sort()).toEqual([
@@ -230,6 +232,7 @@ test("fetch normalizes an issue", async () => {
   expect(snap).toMatchObject({
     repo: "kde/apps/konsole", title: "Crash on start", state: "closed", stateDetail: undefined,
     ciState: null, hasConflicts: false, authoredByMe: false, labels: ["crash"],
+    createdAt: null, updatedAt: null, // missing from the response: unknown, not a failed fetch
   });
   expect(snap.events.map((e) => [e.key, e.kind, e.actorRole])).toEqual([
     ["c:1", "comment", "me"], ["s:3", "state", "maintainer"],

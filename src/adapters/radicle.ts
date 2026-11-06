@@ -227,6 +227,11 @@ export class RadicleAdapter implements Adapter {
     // The state key counts the activity so far, so closing again after a reopen and some new
     // activity is reported again (a reopen and re-close with nothing in between is not).
     const latest = new Date(Math.max(0, ...events.map((e) => e.at.getTime())));
+    // No dates of its own either: it was created by its first comment or revision, and last
+    // updated by its latest event (author clocks, see timesUnreliable).
+    const first = "discussion" in item ? item.discussion[0] : item.revisions[0];
+    const createdAt = first ? new Date(first.timestamp * 1000) : null;
+    const updatedAt = events.length > 0 ? latest : null;
     const anon = { actor: "", actorRole: "unknown" as const, at: latest };
     const closedAs = "discussion" in item ? (item.state.status === "closed" ? "closed" : null)
       : item.state.status === "archived" ? "archived" : null;
@@ -245,6 +250,8 @@ export class RadicleAdapter implements Adapter {
       // Author clocks, and items that reach the node late by gossip.
       timesUnreliable: true,
       labels: item.labels,
+      createdAt,
+      updatedAt,
       events,
     };
   }

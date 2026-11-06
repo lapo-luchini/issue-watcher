@@ -25,6 +25,7 @@ const ev = (id: number, type: string, login: string, extra: Record<string, unkno
 const prRoutes: Record<string, Route> = {
   "/repos/foo/bar/issues/42": {
     title: "Fix build on FreeBSD", state: "closed", user: user("Lapo"), labels: [{ name: "bug" }],
+    created_at: "2026-10-20T08:00:00Z", updated_at: "2026-11-02T09:30:00Z",
   },
   "/repos/foo/bar/issues/42/timeline": [
     ev(1, "comment", "writer", { body: "Please rebase onto main" }),
@@ -103,6 +104,7 @@ test("fetch normalizes a merged PR", async () => {
   expect(snap).toMatchObject({
     repo: "foo/bar", title: "Fix build on FreeBSD", state: "merged", ciState: "failure",
     hasConflicts: false, authoredByMe: true, labels: ["bug"],
+    createdAt: new Date("2026-10-20T08:00:00Z"), updatedAt: new Date("2026-11-02T09:30:00Z"),
   });
   expect(snap.stateDetail).toBeUndefined();
   const byKey = Object.fromEntries(snap.events.map((e) => [e.key, e]));

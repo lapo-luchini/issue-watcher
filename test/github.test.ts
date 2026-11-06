@@ -33,6 +33,7 @@ const prRoutes = {
   "/repos/foo/bar/issues/42": {
     title: "Fix build on FreeBSD", state: "closed", state_reason: null,
     user: { login: "Lapo" }, labels: [{ name: "bug" }],
+    created_at: "2026-10-20T08:00:00Z", updated_at: "2026-11-02T09:30:00Z",
   },
   "/repos/foo/bar/issues/42/timeline?per_page=100": [
     { event: "commented", id: 1, actor: { login: "maint" }, user: { login: "maint" }, author_association: "MEMBER",
@@ -87,6 +88,7 @@ test("fetch normalizes a merged PR", async () => {
   expect(snap).toMatchObject({
     repo: "foo/bar", title: "Fix build on FreeBSD", state: "merged", ciState: "failure",
     hasConflicts: false, authoredByMe: true, labels: ["bug"],
+    createdAt: new Date("2026-10-20T08:00:00Z"), updatedAt: new Date("2026-11-02T09:30:00Z"),
   });
   const byKey = Object.fromEntries(snap.events.map((e) => [e.key, e]));
   expect(Object.keys(byKey).sort()).toEqual(["c:1", "c:2", "commit:abc123def4567890", "l:5", "m:6", "r:3", "s:8"]);

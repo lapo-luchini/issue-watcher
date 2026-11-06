@@ -47,6 +47,9 @@ export interface Snapshot {
   // first run they cannot tell old history from news, so none of it is baseline.
   timesUnreliable?: boolean;
   labels: string[];
+  // The item's own dates, as the forge reports them (or, where it has none, its first and latest event).
+  createdAt?: Date | null;
+  updatedAt?: Date | null;
   events: NormalizedEvent[];
 }
 

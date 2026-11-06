@@ -18,6 +18,7 @@ const item: ItemRow = {
   state: "open", stateDetail: null, ciState: "success", hasConflicts: false, authoredByMe: true, maintainedByMe: false,
   labels: ["bug"], lastSignalAt: null, lastSignalSummary: null, seenAt: null,
   baselineAt: "2026-11-01T00:00:00.000Z", fetchedAt: "2026-11-01T00:00:00.000Z", snapshotJson: null,
+  createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-30T00:00:00.000Z",
 };
 const event: EventRow = {
   itemUrl: url, key: "c:1", kind: "comment", actor: "maint", actorRole: "maintainer",

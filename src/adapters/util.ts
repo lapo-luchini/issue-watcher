@@ -41,3 +41,9 @@ export function parseUrl(url: string): URL | null {
     return null;
   }
 }
+
+/** A date the forge reports, or null when it is missing or unparseable: an item's dates are informative, never worth failing a fetch. */
+export function forgeDate(value: string | null | undefined): Date | null {
+  const d = value ? new Date(value) : null;
+  return d && !Number.isNaN(d.getTime()) ? d : null;
+}

@@ -3,7 +3,7 @@
 import type { InstanceConfig } from "../core/config.ts";
 import { defaultHttp, getAllPages, getJson, HttpError, RateLimitError, type HttpDeps } from "../core/http.ts";
 import type { ActorRole, Adapter, CiState, ItemRef, ItemState, NormalizedEvent, Snapshot } from "../core/model.ts";
-import { mentions, notGone, optional, parseUrl } from "./util.ts";
+import { forgeDate, mentions, notGone, optional, parseUrl } from "./util.ts";
 
 // Only the fields we use from Forgejo's REST responses.
 interface FjUser { login: string }
@@ -12,6 +12,8 @@ interface FjIssue {
   state: "open" | "closed";
   user: FjUser | null;
   labels: { name: string }[];
+  created_at: string;
+  updated_at: string;
 }
 interface FjPull {
   merged: boolean;
@@ -207,6 +209,8 @@ export class ForgejoAdapter implements Adapter {
       hasConflicts,
       authoredByMe: issue.user?.login.toLowerCase() === this.me,
       labels: issue.labels.map((l) => l.name),
+      createdAt: forgeDate(issue.created_at),
+      updatedAt: forgeDate(issue.updated_at),
       events,
     };
   }

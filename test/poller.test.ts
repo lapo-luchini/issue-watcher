@@ -71,6 +71,13 @@ test("first sight is baseline: history stored, nothing unread", () => {
   expect(unread(PR)).toBe(false);
 });
 
+test("the item's own dates are stored, and cleared when the forge stops reporting them", () => {
+  applySnapshot(snapshot(PR, [], { createdAt: minutes(-600), updatedAt: minutes(-60) }), ctx, T0, null);
+  expect(store.getItem(PR)).toMatchObject({ createdAt: minutes(-600).toISOString(), updatedAt: minutes(-60).toISOString() });
+  applySnapshot(snapshot(PR, []), ctx, T0, null);
+  expect(store.getItem(PR)).toMatchObject({ createdAt: null, updatedAt: null });
+});
+
 test("first sight on a later run: with unreliable timestamps, nothing is baseline", () => {
   // Radicle: author clocks, and patches arrive late by gossip. An item new to discovery after
   // the first run is news, whatever its timestamps say.

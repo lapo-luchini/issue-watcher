@@ -235,6 +235,7 @@ export function applySnapshot(
     hasConflicts: conflicts, authoredByMe: snap.authoredByMe, maintainedByMe, labels: snap.labels,
     lastSignalAt, lastSignalSummary, seenAt, baselineAt: prev?.baselineAt ?? nowIso,
     fetchedAt: nowIso, snapshotJson: JSON.stringify(meta),
+    createdAt: snap.createdAt?.toISOString() ?? null, updatedAt: snap.updatedAt?.toISOString() ?? null,
   });
   return newSignals;
 }
