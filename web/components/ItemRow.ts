@@ -89,7 +89,10 @@ export const ItemRow = defineComponent({
           <p v-if="item.lastSignalSummary" class="item__latest">{{ item.lastSignalSummary }}</p>
           <p v-if="item.note && !editingNote" class="item__note">{{ item.note }}</p>
         </div>
-        <time class="item__time" :datetime="item.lastSignalAt ?? ''" :title="absoluteTime(item.lastSignalAt)">{{ relativeTime(item.lastSignalAt) }}</time>
+        <time v-if="item.lastSignalAt" class="item__time" :datetime="item.lastSignalAt"
+          :title="'Latest news: ' + absoluteTime(item.lastSignalAt)">{{ relativeTime(item.lastSignalAt) }}</time>
+        <time v-else-if="item.lastActivityAt" class="item__time item__time--quiet" :datetime="item.lastActivityAt"
+          :title="'Last updated (nothing worth reporting): ' + absoluteTime(item.lastActivityAt)">{{ relativeTime(item.lastActivityAt) }}</time>
       </div>
       <div v-if="open" class="item__panel">
         <div class="actions">
