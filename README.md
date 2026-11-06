@@ -109,10 +109,6 @@ git merge trunk                      # whenever trunk has new code
 git push origin trunk                # publish trunk only; config stays local
 ```
 
-If an older checkout has `data/config.yaml` or `data/items.yaml` committed on `trunk`, remove them
-there with `git rm --cached data/config.yaml data/items.yaml` (they stay on disk) after
-committing them to `config`.
-
 ## Files
 
 | Path               | In git                  | Content                                              |
