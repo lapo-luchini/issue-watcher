@@ -80,8 +80,25 @@ not come from its own page. To reach it from elsewhere, put it behind a reverse 
 authenticates, and tell the server the public name the proxy forwards
 (`WATCHER_ALLOWED_HOSTS=watcher.example.org`, comma-separated); never expose it directly.
 Requests naming any other host are refused, whatever address the server listens on, so a
-hostile web page cannot reach it through a DNS name of its own. `WATCHER_DEV=1` turns on
-Bun's development mode (live reload of the page) for working on the UI.
+hostile web page cannot reach it through a DNS name of its own.
+
+The proxy must pass the public name on in the `Host` header: changes from the page are refused
+unless it matches the host in the browser's `Origin`. With nginx (TLS and basic auth set up as
+usual):
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8411;
+    proxy_set_header Host $host;                  # the public name (standard port 443)
+    # proxy_set_header Host $host:$server_port;   # on a non-standard port, e.g. 8443
+}
+```
+
+Use `$host`, not `$http_host`: over HTTP/2 browsers send no `Host` header, so `$http_host` can be
+empty, and a request without `Host` is refused with 400. Without the line, nginx sends
+`Host: 127.0.0.1:8411`: the page loads, but every change fails with 403 "cross-origin request".
+
+`WATCHER_DEV=1` turns on Bun's development mode (live reload of the page) for working on the UI.
 
 ## Polling periodically
 
