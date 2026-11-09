@@ -29,6 +29,7 @@ instances:
     url: https://codeberg.org/api/v1
     user: your-codeberg-login
     token_env: CODEBERG_TOKEN
+    timeout: 90                    # seconds per request (default 30): Codeberg's searches are slow when it is busy
 
   - id: freebsd-bz
     type: bugzilla

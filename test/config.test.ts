@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
+import { httpFor } from "../src/adapters/index.ts";
 import { DEFAULT_FILTER, parseConfig } from "../src/core/config.ts";
+import { defaultHttp } from "../src/core/http.ts";
 
 const yaml = `
 instances:
@@ -121,4 +123,20 @@ test("maintainer_domains: optional, lowercased, leading @ dropped", () => {
   expect(parseConfig("instances:\n  - {id: a, type: bugzilla, url: x, user: u}", {}).instances[0]?.maintainerDomains).toBeUndefined();
   expect(() => parseConfig("instances:\n  - {id: a, type: bugzilla, url: x, user: u, maintainer_domains: x.org}", {}))
     .toThrow("config: instances[0]: 'maintainer_domains' must be a list of strings");
+});
+
+test("timeout: optional per-instance request timeout in seconds", () => {
+  const one = (extra: string) => parseConfig(`instances:\n  - {id: a, type: forgejo, url: x, user: u${extra}}`, {}).instances[0];
+  expect(one(", timeout: 90")?.timeoutMs).toBe(90_000);
+  expect(one(", timeout: 2.5")?.timeoutMs).toBe(2_500);
+  expect(one("")?.timeoutMs).toBeUndefined();
+  for (const bad of ["0", "-5", "'90'", "[1]"]) {
+    expect(() => one(`, timeout: ${bad}`)).toThrow("config: instances[0]: 'timeout' must be a number of seconds");
+  }
+});
+
+test("timeout: the instance's adapter uses it, the others keep the default", () => {
+  const cfg = parseConfig("instances:\n  - {id: a, type: forgejo, url: x, user: u, timeout: 90}\n  - {id: b, type: github, url: x, user: u}", {});
+  expect(httpFor(cfg.instances[0]!).timeoutMs).toBe(90_000);
+  expect(httpFor(cfg.instances[1]!)).toBe(defaultHttp);
 });
