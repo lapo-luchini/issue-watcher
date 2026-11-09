@@ -32,6 +32,9 @@ The watcher only reads, so give every token read-only access.
   to *issue*, *notification* and *repository*. Required: without a token, searches return
   everyone's items. Without the notification permission, items you only commented on are not
   discovered; without the repository permission, maintainers are not recognized.
+  Codeberg's search often takes 10 s or more, and over 30 s when the site is busy, failing the
+  poll with "The operation timed out": give the instance a longer `timeout:` (seconds, e.g. 90).
+  A failed poll loses nothing: the next one searches again from where the last good one ended.
 - **Bugzilla** (bugs.freebsd.org, bugs.kde.org, bugzilla.mozilla.org): an API key
   (Preferences → API Keys). Optional: public bugs and searches work anonymously; a key is
   needed for bugs only logged-in users can see. `user` is your login email; list your other

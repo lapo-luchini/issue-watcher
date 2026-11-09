@@ -1,4 +1,5 @@
 import type { Config, InstanceConfig } from "../core/config.ts";
+import { defaultHttp, type HttpDeps } from "../core/http.ts";
 import { canonicalizeIntent, type Intent } from "../core/intent.ts";
 import type { Adapter, ItemRef } from "../core/model.ts";
 import { BugzillaAdapter } from "./bugzilla.ts";
@@ -7,18 +8,24 @@ import { GitHubAdapter } from "./github.ts";
 import { GitLabAdapter } from "./gitlab.ts";
 import { RadicleAdapter } from "./radicle.ts";
 
+/** The HTTP settings for one instance: the defaults, with its own timeout if it sets one. */
+export function httpFor(inst: InstanceConfig): HttpDeps {
+  return inst.timeoutMs ? { ...defaultHttp, timeoutMs: inst.timeoutMs } : defaultHttp;
+}
+
 export function createAdapter(inst: InstanceConfig): Adapter {
+  const http = httpFor(inst);
   switch (inst.type) {
     case "github":
-      return new GitHubAdapter(inst);
+      return new GitHubAdapter(inst, http);
     case "gitlab":
-      return new GitLabAdapter(inst);
+      return new GitLabAdapter(inst, http);
     case "forgejo":
-      return new ForgejoAdapter(inst);
+      return new ForgejoAdapter(inst, http);
     case "bugzilla":
-      return new BugzillaAdapter(inst);
+      return new BugzillaAdapter(inst, http);
     case "radicle":
-      return new RadicleAdapter(inst);
+      return new RadicleAdapter(inst, http);
   }
 }
 

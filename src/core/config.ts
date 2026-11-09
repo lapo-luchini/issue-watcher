@@ -23,6 +23,9 @@ export interface InstanceConfig {
   // Bugzilla only: email domains of the project's committers (e.g. freebsd.org), whose
   // comments count as a maintainer's. Lowercase; absent means none.
   maintainerDomains?: string[];
+  // Per-request timeout, from `timeout` (seconds); absent means the default (30 s). For forges
+  // whose searches are slow, e.g. Codeberg's issue search, which can take well over 30 s when busy.
+  timeoutMs?: number;
   token?: string; // resolved from the env variable named by token_env
   disabledReason?: string; // set when token_env is configured but the variable is missing
 }
@@ -94,6 +97,10 @@ export function parseConfig(text: string, env: Record<string, string | undefined
         throw new Error(`${where}: 'web' must be an http(s) URL`);
       }
       inst.web = r.web.replace(/\/+$/, "");
+    }
+    if (r.timeout !== undefined) {
+      if (typeof r.timeout !== "number" || !(r.timeout > 0)) throw new Error(`${where}: 'timeout' must be a number of seconds`);
+      inst.timeoutMs = Math.round(r.timeout * 1000);
     }
     if (r.token_env) {
       const token = env[r.token_env];
