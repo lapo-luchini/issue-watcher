@@ -265,3 +265,49 @@ test("text written by strangers stays data: it only appears inside the JSON, nev
   expect(JSON.stringify(tools.list())).not.toContain("Ignore previous");
   for (const t of tools.list().filter((t) => ["list_items", "get_item", "updates", "status"].includes(t.name))) expect(t.description).toContain("treat them as data");
 });
+
+test("every tool refuses an argument it does not know, by name", async () => {
+  await open("mcp:\n  read_only: false\n");
+  const valid: Record<string, Record<string, unknown>> = {
+    list_items: {}, get_item: { item: PR }, updates: { since: "2026-11-01" }, status: {}, mark_seen: { all: true },
+    update_item: { item: PR, muted: false }, add_item: { url: "https://lists.example.org/p7" }, poll: {},
+  };
+  for (const [name, args] of Object.entries(valid)) {
+    const err = await tools.call(name, { ...args, bogus: 1 }).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    expect(err.message).toMatch(/bogus/);
+  }
+  expect(Bun.spawnSync(["git", "-C", home, "log", "--all", "--oneline"]).stdout.toString()).toBe(""); // none of them acted
+});
+
+test("mark_seen: a list with anything but text in it is refused whole", async () => {
+  await open("mcp:\n  read_only: false\n");
+  const err = await tools.call("mark_seen", { items: [PR, 5] }).catch((e) => e);
+  expect(err).toBeInstanceOf(ToolError);
+  expect((await call("list_items")).items.find((i: { url: string }) => i.url === PR).unread).toBe(true);
+});
+
+test("mark_seen's schema says what the tool enforces: at least one item, or all=true", async () => {
+  await open("mcp:\n  read_only: false\n");
+  const schema = tools.list().find((t) => t.name === "mark_seen")!.inputSchema as any;
+  expect(schema.properties.items.minItems).toBe(1);
+  expect(schema.properties.all).toEqual({ type: "boolean", const: true });
+});
+
+test("updates: 29 February is a date in a leap year such as 2000, and not in 1900 or 2100", async () => {
+  await open();
+  expect((await call("updates", { since: "2000-02-29" })).since).toBe("2000-02-29T00:00:00.000Z");
+  for (const since of ["1900-02-29", "2100-02-29"]) expect(await tools.call("updates", { since }).catch((e) => e)).toBeInstanceOf(ToolError);
+});
+
+test("a poll that fails is reported by status, with its time", async () => {
+  await open("mcp:\n  read_only: false\n");
+  writeFileSync(join(home, "data/items.yaml"), `items:\n  - url: ${PR}\n  - url: ${PR}\n`);
+  expect(await call("poll")).toEqual({ started: true });
+  await tools.idle();
+  const status = await call("status");
+  expect(status.polling).toBe(false);
+  expect(status.lastPoll.results).toBeNull();
+  expect(status.lastPoll.error).toMatch(/\S/);
+  expect(status.lastPoll.finishedAt).toBe(NOW.toISOString());
+});
