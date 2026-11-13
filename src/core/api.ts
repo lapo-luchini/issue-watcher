@@ -1,11 +1,12 @@
 // Query/command API shared by every front end (CLI, HTTP server; an MCP server later).
 // Front ends never touch the Store or items.yaml directly.
-import { closeSync, mkdirSync, openSync, statSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { linkSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
-import { itemId, type EventRow, type Store } from "./store.ts";
+import { itemId, lockHolder, type EventRow, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
 
 export interface ItemView {
@@ -229,30 +230,72 @@ export interface IntentRepo {
 /**
  * Runs `fn` holding `<home>/var/items.lock`, so that two processes (the web server, `watcher mcp`)
  * never edit items.yaml at once: each would read the file before the other's change and lose it.
- * A lock older than a minute is a crashed process's and is taken over.
+ * The file holds its owner's token and is created complete (linked into place). A lock older than
+ * a minute is a crashed process's and is taken over, by one
+ * waiting process at a time. The lock is released only while it still holds our token.
  */
-async function withItemsLock<T>(home: string, fn: () => Promise<T>): Promise<T> {
+export async function withItemsLock<T>(home: string, fn: () => Promise<T>): Promise<T> {
   const lock = join(home, "var/items.lock");
   mkdirSync(dirname(lock), { recursive: true });
-  for (const deadline = Date.now() + 30_000; ; await Bun.sleep(25)) {
-    try {
-      closeSync(openSync(lock, "wx"));
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  const token = `${lockHolder()} ${randomUUID()}`;
+  const mine = `${lock}.${token.split(" ")[1]}`;
+  writeFileSync(mine, token);
+  try {
+    for (const deadline = Date.now() + 30_000; ; await Bun.sleep(25)) {
       try {
-        if (Date.now() - statSync(lock).mtimeMs > 60_000) unlinkSync(lock);
-      } catch {} // released meanwhile
-      if (Date.now() > deadline) throw new Error(`items.yaml is locked by another process (${lock})`);
+        linkSync(mine, lock); // fails when the lock exists
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        breakIfStale(lock, mine);
+        if (Date.now() > deadline) throw new Error(`items.yaml is locked by another process (${lock})`);
+      }
     }
+  } finally {
+    drop(mine);
   }
   try {
     return await fn();
   } finally {
-    try {
-      unlinkSync(lock);
-    } catch {} // taken over as stale
+    if (readOrNull(lock) === token) drop(lock); // else taken over as stale
   }
+}
+
+function readOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null; // released meanwhile
+  }
+}
+
+function drop(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {} // already gone
+}
+
+const isStale = (path: string): boolean => Date.now() - statSync(path).mtimeMs > 60_000;
+
+/**
+ * Removes `lock` when it is stale. Whoever links `<lock>.break` is the one to look at the lock and
+ * remove it, so two waiting processes can never both remove it, the second one taking the first
+ * one's new lock. A `.break` older than a minute is a crashed process's.
+ */
+function breakIfStale(lock: string, mine: string): void {
+  const claim = `${lock}.break`;
+  try {
+    linkSync(mine, claim);
+  } catch {
+    try {
+      if (Date.now() - statSync(claim).mtimeMs > 60_000) unlinkSync(claim);
+    } catch {} // released meanwhile
+    return;
+  }
+  try {
+    if (isStale(lock)) unlinkSync(lock);
+  } catch {} // released meanwhile
+  drop(claim);
 }
 
 async function rewriteItems(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
