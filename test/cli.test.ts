@@ -67,3 +67,37 @@ test("seen URL marks that item, also from a browser-copied URL; an unknown URL g
   expect(r.err).toContain("no item with URL https://github.com/foo/bar/pull/43");
   expect(r.err).toContain("canonical");
 });
+
+/** Runs `watcher mcp` with these lines on stdin; it ends at the end of stdin. */
+function mcp(lines: unknown[]) {
+  const p = Bun.spawnSync([process.execPath, join(import.meta.dir, "../src/cli.ts"), "mcp"], {
+    env: { ...process.env, WATCHER_HOME: home }, stdin: Buffer.from(lines.map((l) => JSON.stringify(l) + "\n").join("")),
+  });
+  const out = p.stdout.toString();
+  return { code: p.exitCode, replies: out.split("\n").filter((l) => l).map((l) => JSON.parse(l)), err: p.stderr.toString() };
+}
+
+test("mcp: initialize, tools/list and tools/call over stdio; stdout is protocol only; read-only by default", () => {
+  const r = mcp([
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } },
+    { jsonrpc: "2.0", method: "notifications/initialized" },
+    { jsonrpc: "2.0", id: 2, method: "tools/list" },
+    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "list_items", arguments: { unread: true } } },
+    { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "mark_seen", arguments: { all: true } } },
+  ]);
+  expect(r.code).toBe(0);
+  expect(r.replies.map((x) => x.id)).toEqual([1, 2, 3, 4]);
+  expect(r.replies[0].result).toMatchObject({ protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "watcher", version: "0.1.0" } });
+  expect(r.replies[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["list_items", "get_item", "updates", "status"]);
+  const items = JSON.parse(r.replies[2].result.content[0].text).items;
+  expect(items).toMatchObject([{ url: PR, title: "Fix build", unread: true }]);
+  expect(r.replies[3].error.code).toBe(-32602);
+  expect(seenAt()).toBeNull();
+});
+
+test("mcp: a missing config is a message on stderr, exit 1 and nothing on stdout", () => {
+  const p = Bun.spawnSync([process.execPath, join(import.meta.dir, "../src/cli.ts"), "mcp"], { env: { ...process.env, WATCHER_HOME: join(home, "nowhere") } });
+  expect(p.exitCode).toBe(1);
+  expect(p.stdout.toString()).toBe("");
+  expect(p.stderr.toString()).toContain("config file not found");
+});
