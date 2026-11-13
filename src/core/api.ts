@@ -42,12 +42,18 @@ export interface ListOptions {
   includeMuted?: boolean;
   importantOnly?: boolean;
   instance?: string;
+  /**
+   * The register `intent` is the entries of (default when absent). `default` lists everything the
+   * cache has, as before registers existed; any other lists its own entries.
+   */
+  register?: string;
 }
 
 /** Important first, then most recent first (latest news, else last update); items without either last. */
 export function listItems(store: Store, intent: Intent, opts: ListOptions = {}): ItemView[] {
   const activity = store.lastActivity();
-  const views: ItemView[] = store.listItems().map((i) => {
+  const own = opts.register !== undefined && opts.register !== DEFAULT_REGISTER;
+  const views: ItemView[] = store.listItems().filter((i) => !own || intent.has(i.url)).map((i) => {
     const entry = intent.get(i.url);
     return {
       id: i.id, url: i.url, instance: i.instance, kind: i.kind, repo: i.repo, title: i.title,
@@ -81,9 +87,9 @@ export function listItems(store: Store, intent: Intent, opts: ListOptions = {}):
       a.title.localeCompare(b.title));
 }
 
-/** One item by its short id (muted ones included), or null. */
-export function getItem(store: Store, intent: Intent, id: string): ItemView | null {
-  return listItems(store, intent, { includeMuted: true }).find((v) => v.id === id) ?? null;
+/** One item of a register by its short id (muted ones included), or null. */
+export function getItem(store: Store, intent: Intent, id: string, register?: string): ItemView | null {
+  return listItems(store, intent, { includeMuted: true, register }).find((v) => v.id === id) ?? null;
 }
 
 export interface EventView {
