@@ -116,7 +116,7 @@ test("instanceStatus: last run and last success per configured instance", () => 
       { id: "kde", type: "gitlab", url: "https://invent.kde.org/api/v4", user: "u", emails: [], disabledReason: "missing KDE_TOKEN in .env" },
     ],
     filter: DEFAULT_FILTER,
-    commitBranch: "config",
+    commitBranch: "config", mcpReadOnly: true,
   };
   store.recordRun({ instance: "github", startedAt: "2026-11-04T10:00:00.000Z", finishedAt: "2026-11-04T10:01:00.000Z", cursor: "c1", error: null });
   store.recordRun({ instance: "github", startedAt: "2026-11-04T11:00:00.000Z", finishedAt: "2026-11-04T11:01:00.000Z", cursor: "c1", error: "boom" });

@@ -162,7 +162,7 @@ test("caches from before is_baseline and first_since are upgraded in place", () 
   const upgraded = new Store(path);
   // History stored at the item's baseline becomes baseline; later events do not.
   expect(upgraded.eventsFor(url, true).map((e) => [e.key, e.isBaseline])).toEqual([["c:late", false], ["c:old", true]]);
-  refilter(upgraded, { instances: [], filter: DEFAULT_FILTER, commitBranch: "config" }, new Map());
+  refilter(upgraded, { instances: [], filter: DEFAULT_FILTER, commitBranch: "config", mcpReadOnly: true }, new Map());
   expect(upgraded.getItem(url)?.lastSignalAt).toBeNull();
   expect(upgraded.listRetries("github")).toEqual([
     { instance: "github", itemUrl: url, kind: "pr", attempts: 1, lastError: "boom", firstSince: null },

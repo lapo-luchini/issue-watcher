@@ -78,3 +78,7 @@ filter:
     - '^bump$'
   min_comment_length: 20
   bot_allowlist: []
+
+# Optional: the MCP server (`watcher mcp`) only reads unless you allow it to change things.
+# mcp:
+#   read_only: true
