@@ -57,6 +57,7 @@ bun run watcher list [--all] [--muted]
 bun run watcher seen URL... | --all
 bun run watcher refilter
 bun run watcher serve [--port N] [--host H]
+bun run watcher mcp
 ```
 
 `seen` takes item URLs as `list` shows them (a URL copied from the browser, e.g. with
@@ -102,6 +103,50 @@ empty, and a request without `Host` is refused with 400. Without the line, nginx
 `Host: 127.0.0.1:8411`: the page loads, but every change fails with 403 "cross-origin request".
 
 `WATCHER_DEV=1` turns on Bun's development mode (live reload of the page) for working on the UI.
+
+## AI assistants (MCP)
+
+`watcher mcp` is an [MCP](https://modelcontextprotocol.io/) server over stdio, so that an AI
+assistant (Claude Code, Claude Desktop, any MCP client) can answer "what happened on my PRs this
+week?", show an item's history and, if you allow it, act on items as the web page does. The client
+starts it as a child process on the same machine: there is no port to open and nothing to
+authenticate. Register it with the path to your checkout, e.g.:
+
+```sh
+claude mcp add watcher -- bun /path/to/watcher/src/cli.ts mcp
+```
+
+or, in Claude Desktop's JSON configuration:
+
+```json
+{ "mcpServers": { "watcher": { "command": "bun", "args": ["/path/to/watcher/src/cli.ts", "mcp"] } } }
+```
+
+It reads the same `data/` and `var/` as the other commands (`WATCHER_HOME` as well), so poll
+periodically as usual; new data and hand edits to `items.yaml` are seen at once, but a change to
+`config.yaml` (also `mcp.read_only`) needs the assistant to restart the server.
+
+| Tool          | What it does                                                                      |
+|---------------|-----------------------------------------------------------------------------------|
+| `list_items`  | the page's list: `unread`, `important`, `include_muted`, `instance` filter it      |
+| `get_item`    | one item (by URL or id) and its history; `include_filtered` adds the noise events  |
+| `updates`     | news detected after a time (`since`), by item                                      |
+| `status`      | the last poll per instance, and whether a poll is running                          |
+| `mark_seen`   | mark given items, or `all`, seen                                                   |
+| `update_item` | priority, mute and note, committed to the `config` branch as the web page does     |
+| `add_item`    | track an item by URL                                                               |
+| `poll`        | start a poll in the background (`status` follows it)                               |
+
+The last four change things and are **off by default**: with `mcp.read_only` unset or `true` in
+`data/config.yaml` they are not listed, and calling one is answered as an unknown tool. What the
+assistant reads includes text written by strangers (titles, comment excerpts), and a prompt
+injected there must not be able to mute, annotate or add items. Allow writes only if you accept
+that:
+
+```yaml
+mcp:
+  read_only: false
+```
 
 ## Polling periodically
 

@@ -1,17 +1,15 @@
 // HTTP front end: the JSON API of spec section 6 plus the web UI (web/index.html, bundled by Bun
 // on the fly). A thin layer over core/api.ts; the server never touches the store directly.
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import index from "../web/index.html";
-import { canonicalIntentFor, createAdapter, urlRecognizer } from "./adapters/index.ts";
+import { createAdapter } from "./adapters/index.ts";
 import {
-  addItem, changeIntent, getItem, instanceStatus, itemEvents, listItems, markSeen, type ListOptions,
+  addItem, changeIntent, getItem, instanceStatus, itemEvents, listItems, markSeen, parseIntentChange, type ListOptions,
 } from "./core/api.ts";
-import { loadConfig, type InstanceConfig } from "./core/config.ts";
-import { loadIntent, type IntentChange } from "./core/intent.ts";
-import type { Adapter, Priority } from "./core/model.ts";
+import type { InstanceConfig } from "./core/config.ts";
+import { openContext } from "./core/context.ts";
+import type { IntentChange } from "./core/intent.ts";
+import type { Adapter } from "./core/model.ts";
 import { pollAll, type InstanceResult } from "./core/poller.ts";
-import { Store } from "./core/store.ts";
 
 export interface ServerOptions {
   home: string; // the watcher's directory: data/config.yaml, data/items.yaml, var/cache.sqlite
@@ -48,21 +46,11 @@ function withoutPort(host: string): string {
 
 export async function startServer(opts: ServerOptions) {
   const now = opts.now ?? (() => new Date());
-  const config = await loadConfig(join(opts.home, "data/config.yaml"));
-  const recognize = urlRecognizer(config);
-  const where = { home: opts.home, branch: config.commitBranch }; // where items.yaml changes are committed
-  const canonical = (url: string) => recognize(url)?.url ?? url;
-  mkdirSync(join(opts.home, "var"), { recursive: true });
-  const store = new Store(join(opts.home, "var/cache.sqlite"));
+  const { config, recognize, canonical, where, store, intent } = await openContext(opts.home);
   const hostname = opts.hostname ?? "127.0.0.1";
   const allowedHosts = new Set((opts.allowedHosts ?? []).map((h) => withoutPort(h.trim())).filter((h) => h));
   let polling: Promise<void> | null = null;
   let lastPoll: PollReport | null = null;
-
-  /** items.yaml is read on every request, so hand edits and `git pull`s show up without a restart. */
-  async function intent() {
-    return canonicalIntentFor(config, await loadIntent(join(opts.home, "data/items.yaml"))).intent;
-  }
 
   /**
    * Guards every request. The Host header must be a loopback name or an allowed one: a page on
@@ -115,26 +103,11 @@ export async function startServer(opts: ServerOptions) {
   }
 
   function parseChange(b: Record<string, unknown>): IntentChange {
-    const change: IntentChange = {};
-    for (const key of Object.keys(b)) {
-      if (!["priority", "muted", "note"].includes(key)) throw new HttpError(400, `unknown field '${key}'`);
+    try {
+      return parseIntentChange(b);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
     }
-    if ("priority" in b) {
-      if (b.priority !== null && b.priority !== "important" && b.priority !== "normal") {
-        throw new HttpError(400, "priority must be 'important', 'normal' or null");
-      }
-      change.priority = b.priority as Priority | null;
-    }
-    if ("muted" in b) {
-      if (typeof b.muted !== "boolean") throw new HttpError(400, "muted must be true or false");
-      change.muted = b.muted;
-    }
-    if ("note" in b) {
-      if (b.note !== null && typeof b.note !== "string") throw new HttpError(400, "note must be text or null");
-      change.note = b.note as string | null;
-    }
-    if (Object.keys(change).length === 0) throw new HttpError(400, "nothing to change");
-    return change;
   }
 
   function startPoll(): void {

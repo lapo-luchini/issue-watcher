@@ -1,10 +1,12 @@
 // Query/command API shared by every front end (CLI, HTTP server; an MCP server later).
 // Front ends never touch the Store or items.yaml directly.
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
-import { itemId, type Store } from "./store.ts";
+import { holderIsGone, itemId, lockHolder, type EventRow, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
 
 export interface ItemView {
@@ -99,13 +101,40 @@ export interface EventView {
   isBaseline: boolean;
 }
 
-/** An item's events, newest first: signal only, or noise too (with the filter's reason). */
-export function itemEvents(store: Store, url: string, includeNoise: boolean): EventView[] {
-  return store.eventsFor(url, includeNoise).map((e) => ({
+function eventView(e: EventRow): EventView {
+  return {
     key: e.key, kind: e.kind, actor: e.actor, actorRole: e.actorRole,
     at: e.approxAt ?? e.at, reportedAt: e.approxAt ? e.at : null, detectedAt: e.detectedAt,
     summary: summarize(e), details: e.details, excerpt: e.excerpt, isSignal: e.isSignal, reason: e.reason, isBaseline: e.isBaseline,
-  }));
+  };
+}
+
+/** An item's events, newest first: signal only, or noise too (with the filter's reason). */
+export function itemEvents(store: Store, url: string, includeNoise: boolean): EventView[] {
+  return store.eventsFor(url, includeNoise).map(eventView);
+}
+
+export interface ItemUpdates {
+  item: ItemView;
+  events: EventView[]; // newest detection first
+}
+
+/**
+ * The news the watcher detected after `since`, grouped by item, the item with the latest detection
+ * first; muted items are left out. By detection time rather than the event's own, so changes that
+ * reach the watcher late (Radicle) are not missed.
+ */
+export function updates(store: Store, intent: Intent, since: Date): ItemUpdates[] {
+  const items = new Map(listItems(store, intent).map((v) => [v.url, v]));
+  const groups = new Map<string, ItemUpdates>();
+  for (const e of store.signalEventsDetectedAfter(since.toISOString())) {
+    const item = items.get(e.itemUrl);
+    if (!item) continue; // muted (or no longer listed)
+    let group = groups.get(item.url);
+    if (!group) groups.set(item.url, (group = { item, events: [] }));
+    group.events.push(eventView(e));
+  }
+  return [...groups.values()]; // the store's order puts the item with the latest detection first
 }
 
 export interface InstanceStatus {
@@ -168,13 +197,173 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** The change a front end asks for ({priority, muted, note}), checked; throws an Error saying what is wrong. */
+export function parseIntentChange(b: Record<string, unknown>): IntentChange {
+  const change: IntentChange = {};
+  for (const key of Object.keys(b)) {
+    if (!["priority", "muted", "note"].includes(key)) throw new Error(`unknown field '${key}'`);
+  }
+  if ("priority" in b) {
+    if (b.priority !== null && b.priority !== "important" && b.priority !== "normal") {
+      throw new Error("priority must be 'important', 'normal' or null");
+    }
+    change.priority = b.priority as Priority | null;
+  }
+  if ("muted" in b) {
+    if (typeof b.muted !== "boolean") throw new Error("muted must be true or false");
+    change.muted = b.muted;
+  }
+  if ("note" in b) {
+    if (b.note !== null && typeof b.note !== "string") throw new Error("note must be text or null");
+    change.note = b.note as string | null;
+  }
+  if (Object.keys(change).length === 0) throw new Error("nothing to change");
+  return change;
+}
+
 /** Where intent changes go: the watcher's home (a git working copy) and the branch to commit to. */
 export interface IntentRepo {
   home: string;
   branch: string; // Config.commitBranch
 }
 
+/** Times in ms; tests shorten them. */
+export interface LockTiming {
+  waitMs: number;
+  staleMs: number;
+  beatMs: number;
+  claimMs: number; // how long a `.break` claim may stand: shorter than waitMs, or one left behind would block every waiter
+}
+/** The items lock stayed with another process: its message is path-free and may be shown to anyone. */
+export class ItemsBusyError extends Error {}
+/** `addItem` refused the URL; the message names only what the caller passed, so it may be shown. */
+export class ItemRefusedError extends Error {}
+const LOCK_TIMING: LockTiming = { waitMs: 30_000, staleMs: 60_000, beatMs: 10_000, claimMs: 10_000 };
+
+/**
+ * Runs `fn` holding `<home>/var/items.lock`, so that two processes (the web server, `watcher mcp`)
+ * never edit items.yaml at once: each would read the file before the other's change and lose it.
+ * The file holds its owner's token and is created complete (linked into place). While `fn` runs its
+ * owner refreshes the file's mtime; a lock not refreshed for a minute, or left by a process that has
+ * exited, is a crashed process's and is taken over, by one waiting process at a time. The lock is
+ * released only while it still holds our token.
+ */
+export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timing: Partial<LockTiming> = {}): Promise<T> {
+  const { waitMs, staleMs, beatMs, claimMs } = { ...LOCK_TIMING, ...timing };
+  const lock = join(home, "var/items.lock");
+  mkdirSync(dirname(lock), { recursive: true });
+  const token = `${lockHolder()} ${randomUUID()}`;
+  const mine = `${lock}.${token.split(" ")[1]}`;
+  try {
+    writeFileSync(mine, token); // inside the try: a write that fails half way leaves no token file
+    for (const deadline = Date.now() + waitMs; ; await Bun.sleep(25)) {
+      dropLeftovers(lock, mine, staleMs);
+      touch(mine); // the lock and a break claim are this same file: their age counts from now, not from when we began to wait
+      try {
+        linkSync(mine, lock); // fails when the lock exists
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        breakIfStale(lock, mine, staleMs, claimMs);
+        if (Date.now() > deadline) {
+          console.error(`watcher: ${lock} is held by another process`); // the message goes to the assistant: no path in it
+          throw new ItemsBusyError("items.yaml is being changed by another process; try again");
+        }
+      }
+    }
+  } finally {
+    drop(mine);
+  }
+  const beat = setInterval(() => {
+    if (readOrNull(lock) !== token) return; // taken over: not ours to refresh
+    try {
+      touch(lock);
+    } catch {} // released meanwhile
+  }, beatMs);
+  try {
+    return await fn();
+  } finally {
+    clearInterval(beat);
+    if (readOrNull(lock) === token) drop(lock); // else taken over as stale
+  }
+}
+
+/** A process killed before it dropped its `<lock>.<token>` file leaves it behind: those of stale holders go. */
+function dropLeftovers(lock: string, mine: string, staleMs: number): void {
+  const start = `${basename(lock)}.`;
+  for (const name of readdirSync(dirname(lock))) {
+    const path = join(dirname(lock), name);
+    if (!name.startsWith(start) || !/^[0-9a-f-]{36}$/.test(name.slice(start.length)) || path === mine) continue;
+    try {
+      unlinkIfStale(path, staleMs);
+    } catch {} // gone meanwhile
+  }
+}
+
+function touch(path: string): void {
+  const now = new Date();
+  utimesSync(path, now, now);
+}
+
+function readOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null; // released meanwhile
+  }
+}
+
+function drop(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {} // already gone
+}
+
+/**
+ * Removes `path` when it is stale: not refreshed for `staleMs`, or held by a process of this host that
+ * has exited (its token starts with its pid). Only the file that was judged stale goes: when the
+ * name has been given to another file meanwhile (inode), it stays.
+ */
+function unlinkIfStale(path: string, staleMs: number): void {
+  const fd = openSync(path, "r"); // one file for the age, the token and the inode
+  try {
+    const { mtimeMs, ino } = fstatSync(fd);
+    const stale = Date.now() - mtimeMs > staleMs || holderIsGone(readFileSync(fd, "utf8").split(" ")[0]!);
+    if (stale && statSync(path).ino === ino) unlinkSync(path);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Removes `lock` when it is stale. Whoever links `<lock>.break` is the one to look at the lock and
+ * remove it, so two waiting processes can never both remove it, the second one taking the first
+ * one's new lock. A `.break` stands for a moment only: it is stale after `claimMs`, or when its process has exited.
+ */
+export function breakIfStale(lock: string, mine: string, staleMs: number, claimMs: number): void {
+  const claim = `${lock}.break`;
+  try {
+    linkSync(mine, claim);
+  } catch {
+    try {
+      unlinkIfStale(claim, claimMs);
+    } catch {} // released meanwhile
+    return;
+  }
+  const ino = statSync(mine).ino; // the claim is a link to our file
+  try {
+    unlinkIfStale(lock, staleMs);
+  } catch {} // released meanwhile
+  try {
+    if (statSync(claim).ino === ino) unlinkSync(claim); // still ours: after a stall another waiter may have judged it stale and taken its own
+  } catch {} // already gone
+}
+
 async function rewriteItems(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
+  return withItemsLock(where.home, () => rewriteLocked(where, edit, message));
+}
+
+async function rewriteLocked(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
   const path = join(where.home, ITEMS_FILE);
   const file = Bun.file(path);
   const before = (await file.exists()) ? await file.text() : "";
@@ -207,10 +396,10 @@ export function changeIntent(
 export function addItem(
   where: IntentRepo, store: Store, intent: Intent, recognize: (url: string) => ItemRef | null, url: string, title?: string,
 ): Promise<{ url: string; manual: boolean; commit: CommitResult }> {
-  if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) return Promise.reject(new Error(`not a web URL: ${url}`));
+  if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) return Promise.reject(new ItemRefusedError(`not a web URL: ${url}`));
   const ref = recognize(url);
   const canonical = ref?.url ?? url;
-  if (intent.has(canonical) || store.getItem(canonical)) return Promise.reject(new Error(`already tracked: ${canonical}`));
+  if (intent.has(canonical) || store.getItem(canonical)) return Promise.reject(new ItemRefusedError(`already tracked: ${canonical}`));
   const manual = !ref;
   const message = `watcher: add ${manual ? "manual item " : ""}${itemLabel(canonical)}`;
   return serialized(async () => ({

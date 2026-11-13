@@ -3,12 +3,16 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import pkg from "../package.json" with { type: "json" };
 import { canonicalIntentFor, createAdapter, urlRecognizer } from "./adapters/index.ts";
 import { listItems, markSeen } from "./core/api.ts";
 import { loadConfig } from "./core/config.ts";
+import { openContext } from "./core/context.ts";
 import { loadIntent } from "./core/intent.ts";
 import { pollAll, refilter } from "./core/poller.ts";
 import { Store } from "./core/store.ts";
+import { serve } from "./mcp/protocol.ts";
+import { createTools } from "./mcp/tools.ts";
 import { startServer } from "./server.ts";
 
 const USAGE = `usage: watcher <command> [options]
@@ -17,7 +21,8 @@ const USAGE = `usage: watcher <command> [options]
   list [--all] [--muted]             show unread items (--all: every item)
   seen URL... | seen --all           mark the given items (or all items) seen
   refilter                           re-run the noise filter over stored events
-  serve [--port N] [--host H]        web UI on http://127.0.0.1:8411/ (env: WATCHER_PORT, WATCHER_HOST)`;
+  serve [--port N] [--host H]        web UI on http://127.0.0.1:8411/ (env: WATCHER_PORT, WATCHER_HOST)
+  mcp                                MCP server on stdin/stdout, for an AI assistant (see README)`;
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -62,6 +67,18 @@ async function main(argv: string[]): Promise<number> {
     });
     console.log("watcher: stopping (waiting for a running poll, if any)");
     await srv.stop();
+    return 0;
+  }
+  if (cmd === "mcp") {
+    // stdout carries the protocol and nothing else; problems go to stderr (and exit code 1).
+    const ctx = await openContext(home);
+    try {
+      const tools = createTools(ctx);
+      await serve(Bun.stdin.stream(), async (line) => void (await Bun.write(Bun.stdout, line)), tools, { name: "watcher", version: pkg.version });
+      await tools.idle(); // stdin closed while a poll started by the assistant runs: let it finish
+    } finally {
+      ctx.store.close();
+    }
     return 0;
   }
   const config = await loadConfig(join(home, "data/config.yaml"));

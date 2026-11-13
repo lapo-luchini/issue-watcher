@@ -1,13 +1,14 @@
-import { beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { DEFAULT_FILTER } from "../src/core/config.ts";
 import { refilter } from "../src/core/poller.ts";
 import { itemId, lockHolder, Store, type EventRow, type ItemRow } from "../src/core/store.ts";
 
 let store: Store;
+afterEach(cleanupTmp);
+
 beforeEach(() => {
   store = new Store(":memory:");
 });
@@ -139,7 +140,7 @@ test("waits for a busy database instead of failing at once", () => {
 });
 
 test("caches from before is_baseline and first_since are upgraded in place", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "watcher-store-")), "cache.sqlite");
+  const path = join(tmpDir("store"), "cache.sqlite");
   const old = new Database(path);
   old.exec(`CREATE TABLE items (url TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, instance TEXT NOT NULL, kind TEXT NOT NULL,
     repo TEXT NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL, state_detail TEXT, ci_state TEXT,
@@ -162,7 +163,7 @@ test("caches from before is_baseline and first_since are upgraded in place", () 
   const upgraded = new Store(path);
   // History stored at the item's baseline becomes baseline; later events do not.
   expect(upgraded.eventsFor(url, true).map((e) => [e.key, e.isBaseline])).toEqual([["c:late", false], ["c:old", true]]);
-  refilter(upgraded, { instances: [], filter: DEFAULT_FILTER, commitBranch: "config" }, new Map());
+  refilter(upgraded, { instances: [], filter: DEFAULT_FILTER, commitBranch: "config", mcpReadOnly: true }, new Map());
   expect(upgraded.getItem(url)?.lastSignalAt).toBeNull();
   expect(upgraded.listRetries("github")).toEqual([
     { instance: "github", itemUrl: url, kind: "pr", attempts: 1, lastError: "boom", firstSince: null },
@@ -181,4 +182,17 @@ test("rollback discards writes", () => {
   store.upsertItem(item);
   store.rollback();
   expect(store.getItem(url)).toBeNull();
+});
+
+test("signalEventsDetectedAfter: news only, by detection time, strictly after, newest first", () => {
+  store.upsertItem(item);
+  const ev = (key: string, over: Partial<EventRow>) => store.insertEvent({ ...event, key, ...over });
+  ev("old", { detectedAt: "2026-11-02T00:00:00.000Z" });
+  ev("late", { at: "2026-10-01T00:00:00.000Z", approxAt: null, detectedAt: "2026-11-06T00:00:00.000Z" }); // happened long ago, detected late
+  ev("new", { detectedAt: "2026-11-07T00:00:00.000Z" });
+  ev("noise", { detectedAt: "2026-11-08T00:00:00.000Z", isSignal: false, reason: "noise:+1" });
+  ev("baseline", { detectedAt: "2026-11-09T00:00:00.000Z", isBaseline: true });
+  expect(store.signalEventsDetectedAfter("2026-11-02T00:00:00.000Z").map((e) => e.key)).toEqual(["new", "late"]);
+  expect(store.signalEventsDetectedAfter("2026-11-07T00:00:00.000Z")).toEqual([]);
+  expect(store.signalEventsDetectedAfter("2026-01-01T00:00:00.000Z").map((e) => e.key)).toEqual(["new", "late", "old"]);
 });

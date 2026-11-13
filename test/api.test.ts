@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
-import { getItem, instanceStatus, itemEvents, itemLabel, listItems, markSeen } from "../src/core/api.ts";
+import { getItem, instanceStatus, itemEvents, itemLabel, listItems, markSeen, parseIntentChange, updates } from "../src/core/api.ts";
 import { DEFAULT_FILTER, type Config } from "../src/core/config.ts";
 import { parseIntent } from "../src/core/intent.ts";
 import { itemId, Store, type ItemRow } from "../src/core/store.ts";
@@ -116,7 +116,7 @@ test("instanceStatus: last run and last success per configured instance", () => 
       { id: "kde", type: "gitlab", url: "https://invent.kde.org/api/v4", user: "u", emails: [], disabledReason: "missing KDE_TOKEN in .env" },
     ],
     filter: DEFAULT_FILTER,
-    commitBranch: "config",
+    commitBranch: "config", mcpReadOnly: true,
   };
   store.recordRun({ instance: "github", startedAt: "2026-11-04T10:00:00.000Z", finishedAt: "2026-11-04T10:01:00.000Z", cursor: "c1", error: null });
   store.recordRun({ instance: "github", startedAt: "2026-11-04T11:00:00.000Z", finishedAt: "2026-11-04T11:01:00.000Z", cursor: "c1", error: "boom" });
@@ -144,4 +144,32 @@ test("markSeen by url or all", () => {
   expect(listItems(store, new Map(), { unreadOnly: true }).map((v) => v.url)).toEqual([B]);
   expect(markSeen(store, [], now)).toBe(2);
   expect(listItems(store, new Map(), { unreadOnly: true })).toEqual([]);
+});
+
+test("updates: news detected after a time, grouped by item, latest detection first, muted items left out", () => {
+  const ev = (url: string, key: string, detectedAt: string) => ({
+    itemUrl: url, key, kind: "comment" as const, actor: "bob", actorRole: "contributor" as const, at: "2026-10-01T00:00:00.000Z", detectedAt,
+    excerpt: `text ${key}`, details: null, isSignal: true, reason: "signal:comment", isBaseline: false,
+  });
+  for (const u of [A, B, M]) store.upsertItem(row(u, {}));
+  store.insertEvent(ev(A, "c:1", "2026-11-03T00:00:00.000Z"));
+  store.insertEvent(ev(B, "c:1", "2026-11-04T00:00:00.000Z"));
+  store.insertEvent(ev(A, "c:2", "2026-11-05T00:00:00.000Z"));
+  store.insertEvent(ev(M, "c:1", "2026-11-06T00:00:00.000Z"));
+  store.insertEvent(ev(B, "c:0", "2026-11-01T00:00:00.000Z")); // before `since`
+  const intent = parseIntent(`items:\n  - url: ${M}\n    muted: true`);
+  const r = updates(store, intent, new Date("2026-11-02T00:00:00.000Z"));
+  expect(r.map((g) => [g.item.url, g.events.map((e) => e.key)])).toEqual([[A, ["c:2", "c:1"]], [B, ["c:1"]]]);
+  expect(r[0]!.events[0]).toMatchObject({ summary: "comment by @bob: text c:2", detectedAt: "2026-11-05T00:00:00.000Z" });
+  expect(updates(store, intent, new Date("2026-11-05T00:00:00.000Z"))).toEqual([]);
+});
+
+test("parseIntentChange: priority, muted and note, checked; says what is wrong", () => {
+  expect(parseIntentChange({ priority: "important", muted: false, note: null })).toEqual({ priority: "important", muted: false, note: null });
+  expect(parseIntentChange({ priority: null })).toEqual({ priority: null });
+  expect(() => parseIntentChange({ priority: "urgent" })).toThrow("priority must be 'important', 'normal' or null");
+  expect(() => parseIntentChange({ muted: "yes" })).toThrow("muted must be true or false");
+  expect(() => parseIntentChange({ note: 3 })).toThrow("note must be text or null");
+  expect(() => parseIntentChange({ title: "x" })).toThrow("unknown field 'title'");
+  expect(() => parseIntentChange({})).toThrow("nothing to change");
 });
