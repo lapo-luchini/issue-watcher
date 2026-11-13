@@ -91,3 +91,17 @@ test("an id that cannot be written back (1e400 reads as Infinity) is an invalid 
   const r = await run(['{"jsonrpc":"2.0","id":1e400,"method":"ping"}\n']);
   expect(r).toEqual([{ jsonrpc: "2.0", id: null, error: { code: -32600, message: "id must be a string or a number" } }]);
 });
+
+test("tools/call with params that are not an object, or without a text name: invalid params, each saying which", async () => {
+  const r = await run([req(1, "tools/call", null), req(2, "tools/call", [1]), req(3, "tools/call", "echo"), req(4, "tools/call", {}), req(5, "tools/call", { name: 5 })]);
+  expect(r.map((x) => x.error.code)).toEqual([-32602, -32602, -32602, -32602, -32602]);
+  expect(r.slice(0, 3).map((x) => x.error.message)).toEqual(Array(3).fill("params must be an object"));
+  expect(r.slice(3).map((x) => x.error.message)).toEqual(Array(2).fill("params.name must be the tool's name"));
+});
+
+test("a character split between two chunks arrives whole", async () => {
+  const bytes = new TextEncoder().encode(req("€", "ping"));
+  const cut = bytes.indexOf(0xe2) + 1; // inside the euro sign's three bytes
+  const r = await run([bytes.slice(0, cut), bytes.slice(cut)]);
+  expect(r).toEqual([{ jsonrpc: "2.0", id: "€", result: {} }]);
+});
