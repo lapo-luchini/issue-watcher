@@ -72,7 +72,7 @@ const WRITE = ["mark_seen", "update_item", "add_item", "poll"];
 
 test("read-only by default: the write tools are not listed and are unknown when called", async () => {
   await open();
-  expect(names()).toEqual(["list_items", "get_item", "updates", "status"]);
+  expect(names()).toEqual(["list_items", "get_item", "list_registers", "updates", "status"]);
   for (const name of WRITE) {
     const err = await tools.call(name, { all: true }).catch((e) => e);
     expect(err).toBeInstanceOf(RpcError);
@@ -84,10 +84,10 @@ test("read-only by default: the write tools are not listed and are unknown when 
 
 test("mcp.read_only: false lists the write tools; true is the same as absent; a string is refused at the config", async () => {
   await open("mcp:\n  read_only: false\n");
-  expect(names()).toEqual(["list_items", "get_item", "updates", "status", ...WRITE]);
+  expect(names()).toEqual(["list_items", "get_item", "list_registers", "updates", "status", ...WRITE]);
   ctx.store.close();
   await open("mcp:\n  read_only: true\n");
-  expect(names()).toHaveLength(4);
+  expect(names()).toHaveLength(5);
   ctx.store.close();
   home = tmpDir("mcp");
   mkdirSync(join(home, "data"));
@@ -317,7 +317,7 @@ test("text written by strangers stays data: it only appears inside the JSON, nev
 test("every tool refuses an argument it does not know, by name", async () => {
   await open("mcp:\n  read_only: false\n");
   const valid: Record<string, Record<string, unknown>> = {
-    list_items: {}, get_item: { item: PR }, updates: { since: "2026-11-01" }, status: {}, mark_seen: { all: true },
+    list_items: {}, get_item: { item: PR }, list_registers: {}, updates: { since: "2026-11-01" }, status: {}, mark_seen: { all: true },
     update_item: { item: PR, muted: false }, add_item: { url: "https://lists.example.org/p7" }, poll: {},
   };
   for (const [name, args] of Object.entries(valid)) {
@@ -358,4 +358,150 @@ test("a poll that fails is reported by status, with its time", async () => {
   expect(status.lastPoll.results).toBeNull();
   expect(status.lastPoll.error).toMatch(/\S/);
   expect(status.lastPoll.finishedAt).toBe(NOW.toISOString());
+});
+
+// ---- Registers ----
+
+const OTHER = "https://github.com/x/y/issues/1";
+const registerPath = (name: string) => join(home, `data/registers/${name}.yaml`);
+const addRegister = (name: string, text: string) => {
+  mkdirSync(join(home, "data/registers"), { recursive: true });
+  writeFileSync(registerPath(name), text);
+};
+/** The same watcher, whose calls name this register when they name none (WATCHER_REGISTER). */
+const asSession = (register: string) => {
+  tools = createTools(ctx, { adapterFor: () => adapter, now: () => NOW, register });
+};
+const subjectOfLast = () => Bun.spawnSync(["git", "-C", home, "log", "-1", "config", "--format=%s"]).stdout.toString();
+const urls = (r: { items: { url: string }[] }) => r.items.map((i) => i.url);
+
+test("list_registers: default first, then the files of data/registers/; says which one calls without a register use", async () => {
+  await open();
+  expect(await call("list_registers")).toEqual({ registers: ["default"], default: "default" });
+  addRegister("zeta", "items:\n");
+  addRegister("alpha", "items:\n");
+  expect(await call("list_registers")).toEqual({ registers: ["default", "alpha", "zeta"], default: "default" });
+  asSession("alpha");
+  expect((await call("list_registers")).default).toBe("alpha");
+});
+
+test("list_items and get_item take a register: its own entries only; the default is the whole cache, as before", async () => {
+  await open();
+  addRegister("houston", `items:\n  - url: ${PR}\n    priority: normal\n    note: ours\n`);
+  expect(urls(await call("list_items", { register: "houston" }))).toEqual([PR]);
+  expect((await call("list_items", { register: "houston" })).items[0]).toMatchObject({ priority: "normal", note: "ours" });
+  expect(urls(await call("list_items", { register: "default" }))).toEqual([PR, MANUAL]);
+  expect(urls(await call("list_items"))).toEqual([PR, MANUAL]);
+  expect((await call("get_item", { item: PR, register: "houston" })).item).toMatchObject({ note: "ours" });
+  expect((await call("get_item", { item: PR })).item.note).toBeNull();
+  const err = await tools.call("get_item", { item: MANUAL, register: "houston" }).catch((e) => e);
+  expect(err).toBeInstanceOf(ToolError);
+  expect(err.message).toBe(`no such item: ${MANUAL}`);
+});
+
+test("calls that name no register use the session's (WATCHER_REGISTER); one that names it overrides", async () => {
+  await open();
+  addRegister("houston", `items:\n  - url: ${PR}\n`);
+  asSession("houston");
+  expect(urls(await call("list_items"))).toEqual([PR]);
+  expect(urls(await call("list_items", { register: "default" }))).toEqual([PR, MANUAL]);
+  expect((await call("get_item", { item: PR })).item.url).toBe(PR);
+  expect(await tools.call("get_item", { item: MANUAL }).catch((e) => e)).toBeInstanceOf(ToolError);
+});
+
+test("a register that does not exist, or a bad name, is an error the assistant sees; nothing is created", async () => {
+  await open("mcp:\n  read_only: false\n");
+  const nope = await tools.call("list_items", { register: "nope" }).catch((e) => e);
+  expect(nope).toBeInstanceOf(ToolError);
+  expect(nope.message).toBe("no such register: nope");
+  expect((await tools.call("get_item", { item: PR, register: "nope" }).catch((e) => e)).message).toBe("no such register: nope");
+  expect((await tools.call("update_item", { item: PR, muted: true, register: "nope" }).catch((e) => e)).message).toBe("no such register: nope");
+  for (const bad of ["../x", "a/b", ".h", "A", "", 3]) {
+    for (const [name, args] of [["list_items", {}], ["get_item", { item: PR }], ["update_item", { item: PR, muted: true }], ["add_item", { url: OTHER }]] as const) {
+      const err = await tools.call(name, { ...args, register: bad }).catch((e) => e);
+      expect(err).toBeInstanceOf(ToolError);
+      expect(err.message).toMatch(/invalid register name|must be text/);
+    }
+  }
+  expect(Bun.spawnSync(["ls", join(home, "data")]).stdout.toString()).not.toContain("registers");
+  expect(Bun.spawnSync(["git", "-C", home, "log", "--all", "--oneline"]).stdout.toString()).toBe("");
+});
+
+test("update_item with a register changes that register's entry only, and the message says which", async () => {
+  await open("mcp:\n  read_only: false\n");
+  addRegister("houston", `items:\n  - url: ${PR}\n`);
+  const r = await call("update_item", { item: PR, muted: true, note: "ours", register: "houston" });
+  expect(r.item).toMatchObject({ url: PR, muted: true, note: "ours" });
+  expect(readFileSync(registerPath("houston"), "utf8")).toBe(`items:\n  - url: ${PR}\n    muted: true\n    note: ours\n`);
+  expect(readFileSync(join(home, "data/items.yaml"), "utf8")).not.toContain(PR);
+  expect(subjectOfLast()).toBe("watcher: mute foo/bar#42; note on foo/bar#42 (register houston)\n");
+  // the default register still has it unmuted
+  expect((await call("list_items")).items.find((i: { url: string }) => i.url === PR)).toMatchObject({ muted: false, note: null });
+  // an item that is in the cache but not in the register is not changed there: add it first
+  const err = await tools.call("update_item", { item: MANUAL, muted: true, register: "houston" }).catch((e) => e);
+  expect(err.message).toBe(`no such item: ${MANUAL}`);
+});
+
+test("update_item and add_item use the session's register when none is named", async () => {
+  await open("mcp:\n  read_only: false\n");
+  addRegister("houston", `items:\n  - url: ${PR}\n`);
+  asSession("houston");
+  await call("update_item", { item: PR, priority: "normal" });
+  expect(readFileSync(registerPath("houston"), "utf8")).toContain("priority: normal");
+  expect(readFileSync(join(home, "data/items.yaml"), "utf8")).not.toContain("priority");
+  await call("add_item", { url: OTHER });
+  expect(readFileSync(registerPath("houston"), "utf8")).toContain(OTHER);
+  expect(readFileSync(join(home, "data/items.yaml"), "utf8")).not.toContain(OTHER);
+});
+
+test("add_item to a register that has no file yet creates it; an item the cache has can be added to another register", async () => {
+  await open("mcp:\n  read_only: false\n");
+  expect(await call("add_item", { url: PR, register: "fresh" })).toEqual({ url: PR, manual: false, warning: null });
+  expect(readFileSync(registerPath("fresh"), "utf8")).toBe(`items:\n  - url: ${PR}\n`);
+  expect(subjectOfLast()).toBe("watcher: add foo/bar#42 (register fresh)\n");
+  expect((await call("list_registers")).registers).toEqual(["default", "fresh"]);
+  expect(urls(await call("list_items", { register: "fresh" }))).toEqual([PR]);
+  // already in that register, and (default only) already in the cache
+  expect((await tools.call("add_item", { url: PR, register: "fresh" }).catch((e) => e)).message).toBe(`already tracked: ${PR}`);
+  expect((await tools.call("add_item", { url: PR }).catch((e) => e)).message).toBe(`already tracked: ${PR}`);
+});
+
+test("a write error names the register's file, never a path", async () => {
+  await open("mcp:\n  read_only: false\n");
+  addRegister("houston", `items:\n  - url: ${PR}\n`);
+  chmodSync(registerPath("houston"), 0o400);
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const err = await tools.call("update_item", { item: PR, muted: true, register: "houston" }).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    expect(err.message).toBe("could not write registers/houston.yaml");
+    expect(logged.mock.calls.flat().join(" ")).toContain(registerPath("houston"));
+  } finally {
+    logged.mockRestore();
+    chmodSync(registerPath("houston"), 0o600);
+  }
+});
+
+test("poll fetches the entries of every register, once", async () => {
+  await open("mcp:\n  read_only: false\n");
+  const knowsOther: Adapter = { ...adapter, discover: async () => [], refFromUrl: (url) => (url === OTHER ? { url, instance: "github", kind: "issue" } : null) };
+  tools = createTools(ctx, { adapterFor: () => knowsOther, now: () => NOW });
+  addRegister("houston", `items:\n  - url: ${OTHER}\n`);
+  addRegister("other", `items:\n  - url: ${OTHER}\n`);
+  writeFileSync(join(home, "data/items.yaml"), `items:\n  - url: ${OTHER}\n`);
+  await call("poll");
+  await tools.idle();
+  expect(fetched.filter((u) => u === OTHER)).toEqual([OTHER]);
+});
+
+test("updates leaves out what the default register mutes, whatever the session's register", async () => {
+  await open();
+  addRegister("houston", `items:\n  - url: ${MUTED}\n`);
+  asSession("houston");
+  expect((await call("updates", { since: "2026-11-01" })).items.map((g: { item: { url: string } }) => g.item.url)).toEqual([PR]);
+});
+
+test("the whole tool list stays under 1,000 tokens, write tools included (a token is about 4 characters)", async () => {
+  await open("mcp:\n  read_only: false\n");
+  expect(JSON.stringify(tools.list()).length / 4).toBeLessThan(1000);
 });
