@@ -1,7 +1,7 @@
 // Query/command API shared by every front end (CLI, HTTP server; an MCP server later).
 // Front ends never touch the Store or items.yaml directly.
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
@@ -291,7 +291,7 @@ function dropLeftovers(lock: string, mine: string, staleMs: number): void {
     const path = join(dirname(lock), name);
     if (!name.startsWith(start) || !/^[0-9a-f-]{36}$/.test(name.slice(start.length)) || path === mine) continue;
     try {
-      if (isStale(path, staleMs)) unlinkSync(path);
+      unlinkIfStale(path, staleMs);
     } catch {} // gone meanwhile
   }
 }
@@ -315,11 +315,17 @@ function drop(path: string): void {
   } catch {} // already gone
 }
 
-/** Not refreshed for `staleMs`, or held by a process of this host that has exited (its token starts with its pid). */
-function isStale(path: string, staleMs: number): boolean {
-  const fd = openSync(path, "r"); // one file for both the age and the token
+/**
+ * Removes `path` when it is stale: not refreshed for `staleMs`, or held by a process of this host that
+ * has exited (its token starts with its pid). Only the file that was judged stale goes: when the
+ * name has been given to another file meanwhile (inode), it stays.
+ */
+function unlinkIfStale(path: string, staleMs: number): void {
+  const fd = openSync(path, "r"); // one file for the age, the token and the inode
   try {
-    return Date.now() - fstatSync(fd).mtimeMs > staleMs || holderIsGone(readFileSync(fd, "utf8").split(" ")[0]!);
+    const { mtimeMs, ino } = fstatSync(fd);
+    const stale = Date.now() - mtimeMs > staleMs || holderIsGone(readFileSync(fd, "utf8").split(" ")[0]!);
+    if (stale && statSync(path).ino === ino) unlinkSync(path);
   } finally {
     closeSync(fd);
   }
@@ -337,12 +343,12 @@ export function breakIfStale(lock: string, mine: string, staleMs: number, claimM
     linkSync(mine, claim);
   } catch {
     try {
-      if (isStale(claim, claimMs)) unlinkSync(claim);
+      unlinkIfStale(claim, claimMs);
     } catch {} // released meanwhile
     return;
   }
   try {
-    if (isStale(lock, staleMs)) unlinkSync(lock);
+    unlinkIfStale(lock, staleMs);
   } catch {} // released meanwhile
   drop(claim);
 }

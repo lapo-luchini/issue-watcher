@@ -3,7 +3,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
-import { withItemsLock } from "../src/core/api.ts";
+import { breakIfStale, withItemsLock } from "../src/core/api.ts";
 import { lockHolder } from "../src/core/store.ts";
 
 function newHome(): string {
@@ -240,3 +240,15 @@ test("a break claim left by a stuck process does not hold up a takeover past the
   await withItemsLock(home, async () => {});
   expect(Date.now() - t0).toBeLessThan(2000);
 }, 40_000);
+
+test("a waiter that does not win the break claim leaves the stale lock to the one that did", () => {
+  const home = newHome();
+  const dead = lockHolder(Bun.spawnSync(["true"]).pid);
+  makeLock(home, dead, 5);
+  writeFileSync(`${lockFile(home)}.break`, `${lockHolder()} claim`); // the winner, still at work
+  const mine = join(home, "var/items.lock.00000000-0000-0000-0000-000000000001");
+  writeFileSync(mine, `${lockHolder()} x`);
+  breakIfStale(lockFile(home), mine, 60_000, 10_000);
+  expect(readFileSync(lockFile(home), "utf8")).toBe(dead);
+  expect(readFileSync(`${lockFile(home)}.break`, "utf8")).toBe(`${lockHolder()} claim`);
+});
