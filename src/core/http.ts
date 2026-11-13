@@ -67,7 +67,8 @@ export async function getJson<T>(url: string, headers: Record<string, string>, d
     }
     if (res.ok) return { data: (await res.json()) as T, headers: res.headers };
     if (res.status === 404 || res.status === 410) throw new GoneError(res.status, url);
-    if (isRateLimited(res)) throw new RateLimitError(res.status, url, resetTime(res));
+    // GitHub's secondary limits may send 403 with only a message in the body.
+    if (isRateLimited(res) || (res.status === 403 && /rate limit/i.test(await res.clone().text()))) throw new RateLimitError(res.status, url, resetTime(res));
     if (res.status >= 500 && attempt < deps.retries) {
       await deps.sleep(backoff(attempt));
       continue;
