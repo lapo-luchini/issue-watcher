@@ -123,7 +123,8 @@ or, in Claude Desktop's JSON configuration:
 ```
 
 It reads the same `data/` and `var/` as the other commands (`WATCHER_HOME` as well), so poll
-periodically as usual; the server never needs to be restarted to see new data or hand edits.
+periodically as usual; new data and hand edits to `items.yaml` are seen at once, but a change to
+`config.yaml` (also `mcp.read_only`) needs the assistant to restart the server.
 
 | Tool          | What it does                                                                      |
 |---------------|-----------------------------------------------------------------------------------|
