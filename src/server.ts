@@ -7,9 +7,10 @@ import {
 } from "./core/api.ts";
 import type { InstanceConfig } from "./core/config.ts";
 import { openContext } from "./core/context.ts";
-import type { IntentChange } from "./core/intent.ts";
+import type { Intent, IntentChange } from "./core/intent.ts";
 import type { Adapter } from "./core/model.ts";
 import { pollAll, type InstanceResult } from "./core/poller.ts";
+import { checkRegisterName, DEFAULT_REGISTER, RegisterError } from "./core/registers.ts";
 
 export interface ServerOptions {
   home: string; // the watcher's directory: data/config.yaml, data/items.yaml, var/cache.sqlite
@@ -46,7 +47,8 @@ function withoutPort(host: string): string {
 
 export async function startServer(opts: ServerOptions) {
   const now = opts.now ?? (() => new Date());
-  const { config, recognize, canonical, where, store, intent } = await openContext(opts.home);
+  const ctx = await openContext(opts.home);
+  const { config, recognize, canonical, where, store } = ctx;
   const hostname = opts.hostname ?? "127.0.0.1";
   const allowedHosts = new Set((opts.allowedHosts ?? []).map((h) => withoutPort(h.trim())).filter((h) => h));
   let polling: Promise<void> | null = null;
@@ -96,8 +98,28 @@ export async function startServer(opts: ServerOptions) {
     return b as Record<string, unknown>;
   }
 
-  async function itemOr404(id: string) {
-    const item = getItem(store, await intent(), id);
+  /** The register a request is about: `?register=`, default `default`. A bad name is a 400. */
+  function registerOf(req: Request): string {
+    const name = new URL(req.url).searchParams.get("register") ?? DEFAULT_REGISTER;
+    try {
+      return checkRegisterName(name);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  }
+
+  /** A register's entries; one that does not exist is a 404. */
+  async function entries(register: string): Promise<Intent> {
+    try {
+      return await ctx.intent(register);
+    } catch (err) {
+      if (err instanceof RegisterError) throw new HttpError(404, err.message);
+      throw err;
+    }
+  }
+
+  async function itemOr404(id: string, register: string) {
+    const item = getItem(store, await entries(register), id, register);
     if (!item) throw new HttpError(404, `no item ${id}`);
     return item;
   }
@@ -115,7 +137,7 @@ export async function startServer(opts: ServerOptions) {
     const report = lastPoll;
     polling = (async () => {
       try {
-        report.results = await pollAll({ store, config, intent: await intent(), adapterFor: opts.adapterFor ?? createAdapter, now });
+        report.results = await pollAll({ store, config, intent: await ctx.allIntent(), adapterFor: opts.adapterFor ?? createAdapter, now });
       } catch (err) {
         report.error = (err as Error).message;
       } finally {
@@ -136,16 +158,20 @@ export async function startServer(opts: ServerOptions) {
         GET: route(async (req) => {
           const q = new URL(req.url).searchParams;
           const on = (k: string) => q.get(k) === "1" || q.get(k) === "true";
-          const o: ListOptions = { unreadOnly: on("unread"), importantOnly: on("important"), includeMuted: on("muted") };
+          const register = registerOf(req);
+          const o: ListOptions = { unreadOnly: on("unread"), importantOnly: on("important"), includeMuted: on("muted"), register };
           if (q.get("instance")) o.instance = q.get("instance")!;
-          return json({ items: listItems(store, await intent(), o) });
+          return json({ items: listItems(store, await entries(register), o) });
         }),
         POST: route(async (req) => {
           const b = await body(req);
           if (typeof b.url !== "string") throw new HttpError(400, "url is required");
           if (b.title !== undefined && typeof b.title !== "string") throw new HttpError(400, "title must be text");
+          const register = registerOf(req);
           try {
-            const r = await addItem(where, store, await intent(), recognize, b.url.trim(), b.title as string | undefined);
+            // A register that does not exist yet is created by its first item.
+            const known = ctx.registers().includes(register) ? await entries(register) : new Map();
+            const r = await addItem(where, store, known, recognize, b.url.trim(), b.title as string | undefined, register);
             return json({ url: r.url, manual: r.manual, warning: r.commit.warning ?? null }, 201);
           } catch (err) {
             throw new HttpError(400, (err as Error).message);
@@ -153,26 +179,28 @@ export async function startServer(opts: ServerOptions) {
         }),
       },
       "/api/items/:id": {
-        GET: route(async (req) => json({ item: await itemOr404(req.params.id!) })),
+        GET: route(async (req) => json({ item: await itemOr404(req.params.id!, registerOf(req)) })),
         PATCH: route(async (req) => {
-          const item = await itemOr404(req.params.id!);
-          const r = await changeIntent(where, item.url, parseChange(await body(req)), canonical, item.instance ? item.repo : undefined);
-          return json({ item: await itemOr404(item.id), warning: r.warning ?? null });
+          const register = registerOf(req);
+          const item = await itemOr404(req.params.id!, register);
+          const r = await changeIntent(where, item.url, parseChange(await body(req)), canonical, item.instance ? item.repo : undefined, register);
+          return json({ item: await itemOr404(item.id, register), warning: r.warning ?? null });
         }),
       },
       "/api/items/:id/events": {
         GET: route(async (req) => {
-          const item = await itemOr404(req.params.id!);
+          const item = await itemOr404(req.params.id!, registerOf(req));
           const noise = new URL(req.url).searchParams.get("noise") === "1";
           return json({ events: itemEvents(store, item.url, noise) });
         }),
       },
       "/api/items/:id/seen": {
         POST: route(async (req) => {
-          const item = await itemOr404(req.params.id!);
+          const item = await itemOr404(req.params.id!, registerOf(req));
           return json({ marked: markSeen(store, [item.url], now()) });
         }),
       },
+      "/api/registers": { GET: route(() => json({ registers: ctx.registers() })) },
       "/api/seen": { POST: route(() => json({ marked: markSeen(store, [], now()) })) },
       "/api/poll": {
         POST: route(() => {
