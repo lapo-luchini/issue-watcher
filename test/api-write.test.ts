@@ -1,8 +1,8 @@
 // Commands that change items.yaml: written, committed, serialized.
-import { beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { addItem, changeIntent, type IntentRepo } from "../src/core/api.ts";
 import { parseIntent } from "../src/core/intent.ts";
 import type { ItemRef } from "../src/core/model.ts";
@@ -20,8 +20,10 @@ const recognize = (url: string): ItemRef | null => {
 };
 const canonical = (url: string) => recognize(url)?.url ?? url;
 
+afterEach(cleanupTmp);
+
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "watcher-home-"));
+  home = tmpDir("home");
   for (const args of [["init", "-q"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.org"]]) git(...args);
   mkdirSync(join(home, "data"));
   writeFileSync(join(home, "data/items.yaml"), "# mine\nitems:\n  - url: https://github.com/foo/bar/pull/42/files\n    note: old\n");
@@ -93,7 +95,7 @@ test("addItem refuses non-web URLs and items already tracked", async () => {
 });
 
 test("without git the file is still written, and the failed commit is a warning", async () => {
-  const plain = mkdtempSync(join(tmpdir(), "watcher-plain-"));
+  const plain = tmpDir("plain");
   const r = await changeIntent({ home: plain, branch: "config" }, "https://github.com/x/y/issues/7", { muted: true }, canonical);
   expect(r.ok).toBe(false);
   expect(r.warning).toContain("git commit failed");

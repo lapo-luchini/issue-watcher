@@ -1,13 +1,14 @@
-import { beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { DEFAULT_FILTER } from "../src/core/config.ts";
 import { refilter } from "../src/core/poller.ts";
 import { itemId, lockHolder, Store, type EventRow, type ItemRow } from "../src/core/store.ts";
 
 let store: Store;
+afterEach(cleanupTmp);
+
 beforeEach(() => {
   store = new Store(":memory:");
 });
@@ -139,7 +140,7 @@ test("waits for a busy database instead of failing at once", () => {
 });
 
 test("caches from before is_baseline and first_since are upgraded in place", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "watcher-store-")), "cache.sqlite");
+  const path = join(tmpDir("store"), "cache.sqlite");
   const old = new Database(path);
   old.exec(`CREATE TABLE items (url TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, instance TEXT NOT NULL, kind TEXT NOT NULL,
     repo TEXT NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL, state_detail TEXT, ci_state TEXT,

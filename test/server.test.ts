@@ -1,8 +1,8 @@
 // The HTTP API against a temporary watcher home (a git repo) and a fake forge.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import type { Adapter, ItemRef, Snapshot } from "../src/core/model.ts";
 import { itemId, lockHolder, Store } from "../src/core/store.ts";
 import { startServer } from "../src/server.ts";
@@ -32,7 +32,7 @@ const adapter: Adapter = {
 };
 
 beforeEach(async () => {
-  home = mkdtempSync(join(tmpdir(), "watcher-srv-"));
+  home = tmpDir("srv");
   for (const args of [["init", "-q"], ["config", "user.name", "T"], ["config", "user.email", "t@example.org"]]) {
     Bun.spawnSync(["git", "-C", home, ...args]);
   }
@@ -62,6 +62,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await srv.stop();
+  cleanupTmp();
 });
 
 const api = (path: string, init: RequestInit = {}) => fetch(new URL(path, srv.url), init);
