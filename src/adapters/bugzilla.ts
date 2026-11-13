@@ -109,6 +109,12 @@ export class BugzillaAdapter implements Adapter {
       const body = (await res.clone().json().catch(() => null)) as BzError | null;
       if (body?.code === BUG_ACCESS_DENIED) return new Response(null, { status: 404 });
     }
+    if (!res.ok && this.inst.token) {
+      // getJson quotes the start of an error body, and an error page may echo the request URL.
+      const token = this.inst.token;
+      const body = (await res.text()).replaceAll(token, "***").replaceAll(encodeURIComponent(token), "***");
+      return new Response(body, { status: res.status, headers: res.headers });
+    }
     return res;
   }
 
