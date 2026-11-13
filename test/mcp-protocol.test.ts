@@ -86,3 +86,8 @@ test("requests are handled one at a time, in order", async () => {
   expect(order).toEqual(["start a", "end a", "start b", "end b"]);
   expect(out.map((l) => JSON.parse(l).id)).toEqual([1, 2]);
 });
+
+test("an id that cannot be written back (1e400 reads as Infinity) is an invalid request, not a reply with a null id", async () => {
+  const r = await run(['{"jsonrpc":"2.0","id":1e400,"method":"ping"}\n']);
+  expect(r).toEqual([{ jsonrpc: "2.0", id: null, error: { code: -32600, message: "id must be a string or a number" } }]);
+});

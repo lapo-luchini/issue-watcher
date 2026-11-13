@@ -57,7 +57,7 @@ export async function handleMessage(line: string, tools: ToolSet, info: ServerIn
     return "result" in msg || "error" in msg ? null : fail(null, INVALID_REQUEST, "missing method");
   }
   const notification = !("id" in msg);
-  if (!notification && typeof msg.id !== "string" && typeof msg.id !== "number") return fail(null, INVALID_REQUEST, "id must be a string or a number");
+  if (!notification && typeof msg.id !== "string" && !(typeof msg.id === "number" && Number.isFinite(msg.id))) return fail(null, INVALID_REQUEST, "id must be a string or a number");
   const id = notification ? null : (msg.id as Id);
   try {
     const result = await dispatch(msg.method, msg.params, tools, info);
