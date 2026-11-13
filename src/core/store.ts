@@ -120,7 +120,7 @@ export function lockHolder(pid: number = process.pid): string {
  * True when `holder` is a process of this host and PID space that has exited. Other hosts,
  * namespaces, boots and formats cannot be checked from here: false.
  */
-function holderIsGone(holder: string): boolean {
+export function holderIsGone(holder: string): boolean {
   const m = holder.match(/^(\d+)@([^#]+)(?:#(.*))?$/);
   if (!m || m[2] !== hostname() || (m[3] ?? "") !== PID_SPACE) return false;
   try {
@@ -266,6 +266,15 @@ export class Store {
     const where = includeNoise ? "" : "AND is_signal = 1";
     return this.db.query(`SELECT * FROM events WHERE item_url = $itemUrl ${where} ORDER BY COALESCE(approx_at, at) DESC`)
       .all({ itemUrl }).map(toEvent);
+  }
+
+  /**
+   * The news (signal events, baseline history excluded) first stored after `since`, newest
+   * detection first. By detection time, not the event's own: events that reach us late are included.
+   */
+  signalEventsDetectedAfter(since: string): EventRow[] {
+    return this.db.query(`SELECT * FROM events WHERE is_signal = 1 AND is_baseline = 0 AND detected_at > $since
+      ORDER BY detected_at DESC, item_url, event_key`).all({ since }).map(toEvent);
   }
 
   setVerdict(itemUrl: string, key: string, v: Verdict): void {

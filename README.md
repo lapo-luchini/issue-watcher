@@ -57,6 +57,7 @@ bun run watcher list [--all] [--muted]
 bun run watcher seen URL... | --all
 bun run watcher refilter
 bun run watcher serve [--port N] [--host H]
+bun run watcher mcp
 ```
 
 `seen` takes item URLs as `list` shows them (a URL copied from the browser, e.g. with
@@ -103,6 +104,75 @@ empty, and a request without `Host` is refused with 400. Without the line, nginx
 
 `WATCHER_DEV=1` turns on Bun's development mode (live reload of the page) for working on the UI.
 
+## AI assistants (MCP)
+
+`watcher mcp` is an [MCP](https://modelcontextprotocol.io/) server over stdio, so that an AI
+assistant (Claude Code, Claude Desktop, any MCP client) can answer "what happened on my PRs this
+week?", show an item's history and, if you allow it, act on items as the web page does. The client
+starts it as a child process on the same machine: there is no port to open and nothing to
+authenticate. Register it with the path to your checkout, e.g.:
+
+```sh
+claude mcp add watcher -- bun /path/to/watcher/src/cli.ts mcp
+```
+
+or, in Claude Desktop's JSON configuration:
+
+```json
+{ "mcpServers": { "watcher": { "command": "bun", "args": ["/path/to/watcher/src/cli.ts", "mcp"] } } }
+```
+
+It reads the same `data/` and `var/` as the other commands (`WATCHER_HOME` as well), so poll
+periodically as usual; new data and hand edits to `items.yaml` are seen at once, but a change to
+`config.yaml` (also `mcp.read_only`) needs the assistant to restart the server.
+
+| Tool          | What it does                                                                      |
+|---------------|-----------------------------------------------------------------------------------|
+| `list_items`  | the page's list: `unread`, `important`, `include_muted`, `instance` filter it      |
+| `get_item`    | one item (by URL or id) and its history; `include_filtered` adds the noise events  |
+| `list_registers` | the registers, and the one used when a call names none                          |
+| `updates`     | news detected after a time (`since`), by item                                      |
+| `status`      | the last poll per instance, and whether a poll is running                          |
+| `mark_seen`   | mark given items, or `all`, seen                                                   |
+| `update_item` | priority, mute and note, committed to the `config` branch as the web page does     |
+| `add_item`    | track an item by URL                                                               |
+| `poll`        | start a poll in the background (`status` follows it)                               |
+
+`list_items`, `get_item`, `update_item` and `add_item` take a `register` (see "Registers"); the
+others look at the cache as a whole. The last four change things and are **off by default**: with `mcp.read_only` unset or `true` in
+`data/config.yaml` they are not listed, and calling one is answered as an unknown tool. What the
+assistant reads includes text written by strangers (titles, comment excerpts), and a prompt
+injected there must not be able to mute, annotate or add items. Allow writes only if you accept
+that:
+
+```yaml
+mcp:
+  read_only: false
+```
+
+## Registers
+
+A register is a named list of entries (priority, mute, note, manual items), a file of the
+format of `data/items.yaml`: that file is the register `default`, and `data/registers/<name>.yaml`
+(a lowercase name of letters, digits, `-` and `_`) is the register `<name>`. An install with only
+`items.yaml` works as before. There is one cache and one poll: it fetches the entries of every
+register (an item in two registers is fetched once) and, as before, what discovery finds for
+you. A register's stars, mutes and notes are its own: they show only where the item is an entry.
+
+- `default` lists everything the cache has; any other register lists its own entries.
+- `watcher list --register NAME` (or `WATCHER_REGISTER=NAME`) shows one; `watcher registers`
+  lists them. The web API takes `?register=NAME` on the item routes, and `GET /api/registers`.
+- The MCP server uses `WATCHER_REGISTER` (default `default`) for calls that name no register.
+- `add_item` (and `POST /api/items`) to a register without a file creates it.
+- The priority an item is judged by when polled is `important` if any register says so, else the
+  one they all state, else the automatic one.
+- A register file that cannot be read is skipped by the poll and by every command that does not
+  use it, with a warning on stderr; an error in `items.yaml` still stops them.
+
+Every register file is changed under the one lock `var/items.lock`, and each change is its own
+commit to the `config` branch (the message ends `(register NAME)` for a register other than
+`default`).
+
 ## Polling periodically
 
 The poll is a one-shot command, so run it from cron or a systemd timer, e.g. every 20 minutes:
@@ -122,7 +192,7 @@ commits changes to `data/items.yaml` to a local branch, `config` (`commit_branch
   the commit goes to `config` without touching your branch, index or other files; a missing
   `config` branch is created from the current commit.
 
-On published branches `data/config.yaml` and `data/items.yaml` are git-ignored. The simplest
+On published branches `data/config.yaml`, `data/items.yaml` and `data/registers/` are git-ignored. The simplest
 setup is to run the watcher from a `config` checkout and keep the code current by merging:
 
 ```sh
@@ -138,6 +208,7 @@ git push origin trunk                # publish trunk only; config stays local
 |--------------------|-------------------------|------------------------------------------------------|
 | `data/config.yaml` | on the `config` branch  | instances and filter tuning                          |
 | `data/items.yaml`  | on the `config` branch  | your intent: priority, mute, notes, manual items     |
+| `data/registers/`  | on the `config` branch  | more registers, same format (see "Registers")        |
 | `.env`             | no                      | tokens                                               |
 | `var/cache.sqlite` | no                      | cache; delete it to start over from a quiet baseline |
 

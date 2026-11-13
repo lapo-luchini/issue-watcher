@@ -80,3 +80,13 @@ test("canonicalizeIntent rejects two entries for the same item", () => {
   const intent = parseIntent("items:\n  - url: https://forge.example/o/r/1/\n  - url: https://forge.example/o/r/1");
   expect(() => canonicalizeIntent(intent, fakeRefFromUrl)).toThrow("duplicate url https://forge.example/o/r/1");
 });
+
+test("errors name the file they come from: items.yaml by default, the register's file when given", () => {
+  const dup = "items:\n  - url: https://x.org/a\n  - url: https://x.org/a";
+  expect(() => parseIntent(dup)).toThrow("items.yaml: items[1]: duplicate url");
+  expect(() => parseIntent(dup, "registers/foo.yaml")).toThrow("registers/foo.yaml: items[1]: duplicate url");
+  expect(() => parseIntent("items: 3", "registers/foo.yaml")).toThrow("registers/foo.yaml: 'items' must be a list");
+  expect(() => parseIntent("items:\n  - url: nope", "registers/foo.yaml")).toThrow("registers/foo.yaml: items[0]: invalid url");
+  const twice = parseIntent("items:\n  - url: https://forge.example/o/r/1/\n  - url: https://forge.example/o/r/1");
+  expect(() => canonicalizeIntent(twice, fakeRefFromUrl, "registers/foo.yaml")).toThrow("registers/foo.yaml: duplicate url");
+});

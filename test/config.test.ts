@@ -140,3 +140,16 @@ test("timeout: the instance's adapter uses it, the others keep the default", () 
   expect(httpFor(cfg.instances[0]!).timeoutMs).toBe(90_000);
   expect(httpFor(cfg.instances[1]!)).toBe(defaultHttp);
 });
+
+test("mcp.read_only: true by default, must be a boolean", () => {
+  expect(parseConfig("instances: []", {}).mcpReadOnly).toBe(true);
+  expect(parseConfig("instances: []\nmcp: {}", {}).mcpReadOnly).toBe(true);
+  expect(parseConfig("instances: []\nmcp:\n  read_only: true", {}).mcpReadOnly).toBe(true);
+  expect(parseConfig("instances: []\nmcp:\n  read_only: false", {}).mcpReadOnly).toBe(false);
+  for (const bad of ["'false'", "0", "no ", "null", "[]"]) {
+    expect(() => parseConfig(`instances: []\nmcp:\n  read_only: ${bad}`, {})).toThrow("config: mcp: 'read_only' must be true or false");
+  }
+  for (const bad of ["[]", "yes", "'x'"]) {
+    expect(() => parseConfig(`instances: []\nmcp: ${bad}`, {})).toThrow("config: 'mcp' must be a mapping");
+  }
+});

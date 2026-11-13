@@ -35,6 +35,8 @@ export interface Config {
   filter: FilterConfig;
   // The branch changes to items.yaml are committed to, which can stay local while the code is published.
   commitBranch: string;
+  // MCP server: true (the default) lists and accepts only the tools that read; see `mcp.read_only`.
+  mcpReadOnly: boolean;
 }
 
 export const DEFAULT_FILTER: FilterConfig = {
@@ -130,7 +132,11 @@ export function parseConfig(text: string, env: Record<string, string | undefined
   if (typeof commitBranch !== "string" || !/^(?!-)(?!.*\.\.)(?!.*\/\/)[\w.\/-]+(?<![./]|\.lock)$/.test(commitBranch)) {
     throw new Error("config: 'commit_branch' must be a branch name");
   }
-  return { instances, filter, commitBranch };
+  const mcp = raw.mcp ?? {};
+  if (typeof mcp !== "object" || Array.isArray(mcp)) throw new Error("config: 'mcp' must be a mapping");
+  // Read-only unless explicitly turned off: only a real boolean `false` allows the write tools.
+  if (mcp.read_only !== undefined && typeof mcp.read_only !== "boolean") throw new Error("config: mcp: 'read_only' must be true or false");
+  return { instances, filter, commitBranch, mcpReadOnly: mcp.read_only ?? true };
 }
 
 export async function loadConfig(path: string, env: Record<string, string | undefined> = process.env): Promise<Config> {

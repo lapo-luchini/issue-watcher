@@ -17,13 +17,14 @@ export interface IntentEntry {
 
 export type Intent = Map<string, IntentEntry>;
 
-export function parseIntent(text: string): Intent {
+/** `file` names the register in error messages. */
+export function parseIntent(text: string, file = "items.yaml"): Intent {
   const raw: any = parse(text) ?? {};
   const list = raw.items ?? [];
-  if (!Array.isArray(list)) throw new Error("items.yaml: 'items' must be a list");
+  if (!Array.isArray(list)) throw new Error(`${file}: 'items' must be a list`);
   const out: Intent = new Map();
   list.forEach((r: any, i: number) => {
-    const where = `items.yaml: items[${i}]`;
+    const where = `${file}: items[${i}]`;
     if (typeof r?.url !== "string" || r.url === "") throw new Error(`${where}: 'url' is required`);
     if (!URL.canParse(r.url) || !/^https?:$/.test(new URL(r.url).protocol)) {
       throw new Error(`${where}: invalid url '${r.url}' (http or https only)`);
@@ -44,9 +45,9 @@ export function parseIntent(text: string): Intent {
   return out;
 }
 
-export async function loadIntent(path: string): Promise<Intent> {
+export async function loadIntent(path: string, name = "items.yaml"): Promise<Intent> {
   const file = Bun.file(path);
-  return (await file.exists()) ? parseIntent(await file.text()) : new Map();
+  return (await file.exists()) ? parseIntent(await file.text(), name) : new Map();
 }
 
 /**
@@ -57,6 +58,7 @@ export async function loadIntent(path: string): Promise<Intent> {
 export function canonicalizeIntent(
   intent: Intent,
   refFromUrl: (url: string) => ItemRef | null,
+  file = "items.yaml",
 ): { intent: Intent; unknown: string[] } {
   const out: Intent = new Map();
   const unknown: string[] = [];
@@ -66,7 +68,7 @@ export function canonicalizeIntent(
       unknown.push(entry.url);
       continue;
     }
-    if (out.has(url)) throw new Error(`items.yaml: duplicate url ${url} (${entry.url} is the same item as an earlier entry)`);
+    if (out.has(url)) throw new Error(`${file}: duplicate url ${url} (${entry.url} is the same item as an earlier entry)`);
     out.set(url, { ...entry, url });
   }
   return { intent: out, unknown };
@@ -135,10 +137,10 @@ export function editIntent(text: string, url: string, change: IntentChange, cano
  * Returns `text` with a new entry appended: a manual item (listed, never polled, with an
  * optional title), or a forge item to track (just its canonical URL, fetched on the next poll).
  */
-export function addEntry(text: string, url: string, opts: { manual: boolean; title?: string }): string {
+export function addEntry(text: string, url: string, opts: { manual: boolean; title?: string }, file = "items.yaml"): string {
   const doc = parseDocument(text);
   const items = itemsOf(doc);
-  if (items.items.some((n) => urlOf(n) === url)) throw new Error(`${url} is already listed in items.yaml`);
+  if (items.items.some((n) => urlOf(n) === url)) throw new Error(`${url} is already listed in ${file}`);
   const entry: Record<string, unknown> = { url };
   if (opts.manual) entry.manual = true;
   if (opts.manual && opts.title) entry.title = opts.title;
