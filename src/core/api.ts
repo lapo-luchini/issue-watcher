@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
+import { DEFAULT_REGISTER, ITEMS_FILE, registerFile } from "./registers.ts";
 import { holderIsGone, itemId, lockHolder, type EventRow, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
 
@@ -167,8 +168,7 @@ export function markSeen(store: Store, urls: string[], now: Date): number {
 
 // ---- Changing items.yaml (each change is committed to git) ----
 
-/** items.yaml, relative to the watcher home, which is (normally) a git repository. */
-export const ITEMS_FILE = "data/items.yaml";
+export { ITEMS_FILE };
 
 /** A short name for commit messages: "foo/bar#42", "a/b/c#7", "heartwood#abcd1234", "bugs.freebsd.org bug 300512". */
 export function itemLabel(url: string, repo?: string): string {
