@@ -141,6 +141,15 @@ test("POST /api/poll is refused while another process holds the poll lock", asyn
   expect((await send("POST", "/api/poll", {})).status).toBe(409);
 });
 
+test("GET /api/status says polling while another process holds the poll lock", async () => {
+  const s = new Store(join(home, "var/cache.sqlite"));
+  s.acquireLock("poll", lockHolder(), new Date("2026-11-04T12:00:00.000Z"));
+  expect((await (await api("/api/status")).json()).polling).toBe(true);
+  s.releaseLock("poll");
+  s.close();
+  expect((await (await api("/api/status")).json()).polling).toBe(false);
+});
+
 test("guards: Host must be a loopback name; changes must be JSON from this origin", async () => {
   // DNS rebinding: a foreign name resolving to 127.0.0.1.
   expect((await api("/api/items", { headers: { host: "evil.example:8411" } })).status).toBe(403);
