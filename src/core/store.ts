@@ -117,20 +117,28 @@ export function lockHolder(pid: number = process.pid): string {
 }
 
 /**
- * True when `holder` is a process of this host and PID space that has exited. Other hosts,
- * namespaces, boots and formats cannot be checked from here: false.
+ * Whether `holder` is a process of this host and PID space that is still running ("alive"), has
+ * exited ("gone"), or cannot be checked from here ("unknown": other hosts, namespaces, boots and
+ * formats).
  */
-function holderIsGone(holder: string): boolean {
+function holderState(holder: string): "alive" | "gone" | "unknown" {
   const m = holder.match(/^(\d+)@([^#]+)(?:#(.*))?$/);
-  if (!m || m[2] !== hostname() || (m[3] ?? "") !== PID_SPACE) return false;
+  if (!m || m[2] !== hostname() || (m[3] ?? "") !== PID_SPACE) return "unknown";
   try {
     process.kill(Number(m[1]), 0); // signal 0: only checks that the process exists
-    return false;
+    return "alive";
   } catch (err) {
-    // EPERM: it exists but belongs to another user.
-    return (err as NodeJS.ErrnoException).code === "ESRCH";
+    // EPERM: it exists but belongs to another user, so it is almost surely a reused PID: unverifiable.
+    return (err as NodeJS.ErrnoException).code === "ESRCH" ? "gone" : "unknown";
   }
 }
+
+/** A live local holder keeps the lock this long at most: longer than any poll, shorter than a PID reuse that goes unnoticed. */
+const ALIVE_MAX_MS = 6 * 3600_000;
+
+/** How long a holder in `state` keeps its lock. */
+const lockLifetime = (state: "alive" | "gone" | "unknown" | null, staleMs: number) =>
+  state === "alive" ? Math.max(staleMs, ALIVE_MAX_MS) : staleMs;
 
 /** Short stable id for URLs in the HTTP API. */
 export function itemId(url: string): string {
@@ -337,25 +345,28 @@ export class Store {
 
   /**
    * Takes the named lock for `holder` (see lockHolder()). A lock whose holder process no longer
-   * exists on this host is taken over at once; one held from another host only once it is older
-   * than staleMs (its process cannot be checked from here).
+   * exists on this host is taken over at once, a live one only past ALIVE_MAX_MS (its PID may
+   * have been reused); one whose process cannot be checked from here (another host, another
+   * user's PID) only once it is older than staleMs.
    */
   acquireLock(name: string, holder: string, now: Date, staleMs = 30 * 60_000): boolean {
     const current = this.db.query("SELECT holder FROM locks WHERE name = $name").get({ name }) as { holder: string } | null;
+    const state = current ? holderState(current.holder) : null;
     // Only that holder's row: another poller may have taken the lock over a moment ago.
-    if (current && holderIsGone(current.holder)) this.releaseLock(name, current.holder);
-    const staleBefore = new Date(now.getTime() - staleMs).toISOString();
+    if (current && state === "gone") this.releaseLock(name, current.holder);
+    const staleBefore = new Date(now.getTime() - lockLifetime(state, staleMs)).toISOString();
     this.db.query("DELETE FROM locks WHERE name = $name AND acquired_at < $staleBefore").run({ name, staleBefore });
     return this.db.query("INSERT OR IGNORE INTO locks (name, holder, acquired_at) VALUES ($name, $holder, $at)")
       .run({ name, holder, at: now.toISOString() }).changes > 0;
   }
 
-  /** True when the named lock is held by a live (or unverifiable, not yet stale) holder. */
+  /** True when the named lock is held by a live (or unverifiable) holder that is not past its lifetime. */
   lockHeld(name: string, now: Date, staleMs = 30 * 60_000): boolean {
     const r = this.db.query("SELECT holder, acquired_at FROM locks WHERE name = $name").get({ name }) as
       { holder: string; acquired_at: string } | null;
-    if (!r || holderIsGone(r.holder)) return false;
-    return r.acquired_at >= new Date(now.getTime() - staleMs).toISOString();
+    const state = r ? holderState(r.holder) : "gone";
+    if (!r || state === "gone") return false;
+    return r.acquired_at >= new Date(now.getTime() - lockLifetime(state, staleMs)).toISOString();
   }
 
   /** Releases the lock; with `holder`, only if that holder still has it. */
