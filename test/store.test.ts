@@ -182,3 +182,37 @@ test("rollback discards writes", () => {
   store.rollback();
   expect(store.getItem(url)).toBeNull();
 });
+
+test("a lock held by a live local poller is not taken over for its age", () => {
+  const t0 = new Date("2026-11-04T10:00:00Z");
+  const muchLater = new Date(t0.getTime() + 31 * 60_000);
+  expect(store.acquireLock("poll", lockHolder(), t0)).toBe(true);
+  expect(store.lockHeld("poll", muchLater)).toBe(true);
+  expect(store.acquireLock("poll", lockHolder(process.pid + 1), muchLater)).toBe(false);
+});
+
+test("a live local holder loses the lock after the alive ceiling, so a reused PID cannot block polls for ever", () => {
+  const t0 = new Date("2026-11-04T10:00:00Z");
+  const sixHoursOn = new Date(t0.getTime() + 6 * 3600_000 + 60_000);
+  expect(store.acquireLock("poll", lockHolder(), t0)).toBe(true);
+  expect(store.lockHeld("poll", new Date(t0.getTime() + 5 * 3600_000))).toBe(true);
+  expect(store.lockHeld("poll", sixHoursOn)).toBe(false);
+  expect(store.acquireLock("poll", lockHolder(process.pid + 1), sixHoursOn)).toBe(true);
+});
+
+test("a holder PID owned by another user (EPERM) is unverifiable: stale after staleMs", () => {
+  let owned = false;
+  try {
+    process.kill(1, 0);
+    owned = true; // we may signal PID 1 (running as root): EPERM cannot be provoked here
+  } catch (err) {
+    owned = (err as NodeJS.ErrnoException).code !== "EPERM";
+  }
+  if (owned) return;
+  const t0 = new Date("2026-11-04T10:00:00Z");
+  const later = new Date(t0.getTime() + 31 * 60_000);
+  expect(store.acquireLock("poll", lockHolder(1), t0)).toBe(true);
+  expect(store.lockHeld("poll", new Date(t0.getTime() + 60_000))).toBe(true);
+  expect(store.lockHeld("poll", later)).toBe(false);
+  expect(store.acquireLock("poll", lockHolder(), later)).toBe(true);
+});
