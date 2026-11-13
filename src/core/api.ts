@@ -234,14 +234,14 @@ export interface IntentRepo {
  * a minute, or left by a process that has exited, is a crashed process's and is taken over, by one
  * waiting process at a time. The lock is released only while it still holds our token.
  */
-export async function withItemsLock<T>(home: string, fn: () => Promise<T>): Promise<T> {
+export async function withItemsLock<T>(home: string, fn: () => Promise<T>, waitMs = 30_000): Promise<T> {
   const lock = join(home, "var/items.lock");
   mkdirSync(dirname(lock), { recursive: true });
   const token = `${lockHolder()} ${randomUUID()}`;
   const mine = `${lock}.${token.split(" ")[1]}`;
   writeFileSync(mine, token);
   try {
-    for (const deadline = Date.now() + 30_000; ; await Bun.sleep(25)) {
+    for (const deadline = Date.now() + waitMs; ; await Bun.sleep(25)) {
       try {
         linkSync(mine, lock); // fails when the lock exists
         break;
