@@ -482,6 +482,21 @@ test("a write error names the register's file, never a path", async () => {
   }
 });
 
+test("a read error names the register's file, never a path", async () => {
+  await open();
+  addRegister("houston", `items:\n  - url: ${PR}\n`);
+  chmodSync(registerPath("houston"), 0o000);
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const err = await tools.call("list_items", { register: "houston" }).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    expect(err.message).toBe("could not read registers/houston.yaml");
+  } finally {
+    logged.mockRestore();
+    chmodSync(registerPath("houston"), 0o600);
+  }
+});
+
 test("poll fetches the entries of every register, once", async () => {
   await open("mcp:\n  read_only: false\n");
   const knowsOther: Adapter = { ...adapter, discover: async () => [], refFromUrl: (url) => (url === OTHER ? { url, instance: "github", kind: "issue" } : null) };

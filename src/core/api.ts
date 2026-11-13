@@ -6,7 +6,7 @@ import { basename, dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
-import { DEFAULT_REGISTER, ITEMS_FILE, registerFile, registerLabel } from "./registers.ts";
+import { checkRegisterFile, DEFAULT_REGISTER, ITEMS_FILE, registerFile, registerLabel } from "./registers.ts";
 import { holderIsGone, itemId, lockHolder, type EventRow, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
 
@@ -370,7 +370,10 @@ export function breakIfStale(lock: string, mine: string, staleMs: number, claimM
 
 async function rewriteItems(where: IntentRepo, register: string, edit: (text: string) => string, message: string): Promise<CommitResult> {
   const file = registerFile(register);
-  return withItemsLock(where.home, () => rewriteLocked(where, file, edit, message));
+  return withItemsLock(where.home, () => {
+    checkRegisterFile(where.home, register);
+    return rewriteLocked(where, file, edit, message);
+  });
 }
 
 async function rewriteLocked(where: IntentRepo, file: string, edit: (text: string) => string, message: string): Promise<CommitResult> {

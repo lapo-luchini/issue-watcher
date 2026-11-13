@@ -1,6 +1,6 @@
 // Registers: named lists of entries (priority, mute, note, manual items), each one a file of the
 // format of data/items.yaml. `default` is data/items.yaml itself; any other is data/registers/<name>.yaml.
-import { readdirSync, type Dirent } from "node:fs";
+import { lstatSync, readdirSync, type Dirent } from "node:fs";
 import { join } from "node:path";
 import type { Intent, IntentEntry } from "./intent.ts";
 
@@ -49,6 +49,18 @@ export function listRegisterNames(home: string): string[] {
   return [DEFAULT_REGISTER, ...names];
 }
 
+/** A register file that exists must be a regular file (listRegisterNames ignores anything else): never write through a link or into a directory. */
+export function checkRegisterFile(home: string, name: string): void {
+  if (name === DEFAULT_REGISTER) return;
+  let st;
+  try {
+    st = lstatSync(join(home, registerFile(name)));
+  } catch {
+    return; // not there yet: the write creates it
+  }
+  if (!st.isFile()) throw new RegisterError(`${registerLabel(name)} is not a regular file`);
+}
+
 /** The register named by WATCHER_REGISTER (default `default`); a bad name throws RegisterError. */
 export function registerFromEnv(env: Record<string, string | undefined>): string {
   const v = env.WATCHER_REGISTER;
@@ -58,7 +70,8 @@ export function registerFromEnv(env: Record<string, string | undefined>): string
 /**
  * The entries of all registers as one intent, for what is shared by all: the poll fetches every
  * entry, and the noise filter judges an item by one priority. An item in several registers has
- * `important` if any says so, else the first explicit priority (in the order given); it is
+ * `important` if any says so, else the priority they all state, else none (left to the automatic one:
+ * one register saying `normal` does not demote what another leaves to be judged by itself); it is
  * manual only if every entry says so (a forge item in any register is fetched).
  */
 export function mergeIntents(intents: Intent[]): Intent {
@@ -71,7 +84,9 @@ export function mergeIntents(intents: Intent[]): Intent {
         continue;
       }
       const merged: IntentEntry = { ...have, manual: have.manual && e.manual };
-      if (have.priority !== "important") merged.priority = e.priority === "important" ? "important" : (have.priority ?? e.priority);
+      const priority = have.priority === "important" || e.priority === "important" ? "important" : have.priority === e.priority ? have.priority : undefined;
+      if (priority) merged.priority = priority;
+      else delete merged.priority;
       out.set(e.url, merged);
     }
   }

@@ -164,7 +164,10 @@ you. A register's stars, mutes and notes are its own: they show only where the i
   lists them. The web API takes `?register=NAME` on the item routes, and `GET /api/registers`.
 - The MCP server uses `WATCHER_REGISTER` (default `default`) for calls that name no register.
 - `add_item` (and `POST /api/items`) to a register without a file creates it.
-- The priority an item is judged by when polled is `important` if any register says so.
+- The priority an item is judged by when polled is `important` if any register says so, else the
+  one they all state, else the automatic one.
+- A register file that cannot be read is skipped by the poll and by every command that does not
+  use it, with a warning on stderr; an error in `items.yaml` still stops them.
 
 Every register file is changed under the one lock `var/items.lock`, and each change is its own
 commit to the `config` branch (the message ends `(register NAME)` for a register other than

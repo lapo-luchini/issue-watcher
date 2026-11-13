@@ -129,6 +129,8 @@ export function createTools(ctx: Context, opts: ToolsOptions = {}): WatcherTools
     try {
       return await ctx.intent(register);
     } catch (err) {
+      // A bad or unknown register, or a parse error (they name the file by its label), is told as it is; a system error carries the absolute path: say only which register.
+      if ((err as NodeJS.ErrnoException).code !== undefined) throw new ToolError(`could not read ${registerLabel(register)}`);
       throw new ToolError((err as Error).message);
     }
   }

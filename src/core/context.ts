@@ -1,6 +1,6 @@
 // What every long-running front end (web server, MCP server) sets up the same way: the config, the
 // URL recognizer, the cache and the way the registers (items.yaml and data/registers/) are read and committed.
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalIntentFor, urlRecognizer } from "../adapters/index.ts";
 import type { IntentRepo } from "./api.ts";
@@ -25,7 +25,7 @@ export interface Context {
   intent: (register?: string) => Promise<Intent>;
   /** Every register that exists, `default` first. */
   registers: () => string[];
-  /** The entries of all registers as one: what the poll fetches (see mergeIntents). */
+  /** The entries of all registers as one: what the poll fetches (see mergeIntents). A broken register other than `default` is skipped, with a warning on stderr. */
   allIntent: () => Promise<Intent>;
 }
 
@@ -37,7 +37,7 @@ export async function openContext(home: string): Promise<Context> {
   const registers = () => listRegisterNames(home);
   const intent = async (register = DEFAULT_REGISTER) => {
     const file = registerFile(register); // a bad name is refused before any path is built from it
-    if (register !== DEFAULT_REGISTER && !existsSync(join(home, file))) throw new RegisterError(`no such register: ${register}`);
+    if (!registers().includes(register)) throw new RegisterError(`no such register: ${register}`);
     const label = registerLabel(register);
     return canonicalIntentFor(config, await loadIntent(join(home, file), label), label).intent;
   };
@@ -47,6 +47,15 @@ export async function openContext(home: string): Promise<Context> {
     where: { home, branch: config.commitBranch },
     store: new Store(join(home, "var/cache.sqlite")),
     intent, registers,
-    allIntent: async () => mergeIntents(await Promise.all(registers().map((r) => intent(r)))),
+    // A register file that cannot be read is skipped with a warning, so one project's hand edit does not stop the poll for all; `default` (the tool's own file) still fails loudly.
+    allIntent: async () => mergeIntents(await Promise.all(registers().map(async (r) => {
+      try {
+        return await intent(r);
+      } catch (err) {
+        if (r === DEFAULT_REGISTER) throw err;
+        console.error(`watcher: warning: ${registerLabel(r)} skipped: ${(err as Error).message}`);
+        return new Map();
+      }
+    }))),
   };
 }

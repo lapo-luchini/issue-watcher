@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { openContext } from "../src/core/context.ts";
@@ -85,7 +85,35 @@ test("openContext: a register that has no file is an error; default without its 
 test("openContext: a register file that cannot be read names itself, not items.yaml", async () => {
   await withRegisters({ "data/registers/bad.yaml": "items:\n  - url: nope\n" }, async (ctx) => {
     await expect(ctx.intent("bad")).rejects.toThrow("registers/bad.yaml: items[0]: invalid url");
-    await expect(ctx.allIntent()).rejects.toThrow("registers/bad.yaml");
+  });
+});
+
+test("openContext: a broken register is skipped (with a warning) by the poll's union, not fatal; a broken default still is", async () => {
+  await withRegisters({
+    "data/items.yaml": `items:\n  - url: ${PR}\n`,
+    "data/registers/bad.yaml": "items:\n  - url: nope\n",
+  }, async (ctx, dir) => {
+    const warn: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => void warn.push(a.join(" "));
+    try {
+      expect([...(await ctx.allIntent()).keys()]).toEqual([PR]);
+    } finally {
+      console.error = orig;
+    }
+    expect(warn.join("\n")).toContain("registers/bad.yaml skipped");
+    writeFileSync(join(dir, "data/items.yaml"), "items:\n  - url: nope\n");
+    await expect(ctx.allIntent()).rejects.toThrow("items.yaml");
+  });
+});
+
+test("openContext: a link or a directory in data/registers/ is not a register, to read or to list", async () => {
+  await withRegisters({ "outside.yaml": "items:\n  - url: nope-secret\n" }, async (ctx, dir) => {
+    symlinkSync(join(dir, "outside.yaml"), join(dir, "data/registers/link.yaml"));
+    mkdirSync(join(dir, "data/registers/dir.yaml"));
+    expect(ctx.registers()).toEqual(["default"]);
+    await expect(ctx.intent("link")).rejects.toThrow("no such register: link");
+    await expect(ctx.intent("dir")).rejects.toThrow("no such register: dir");
   });
 });
 

@@ -10,7 +10,7 @@ import { loadConfig } from "./core/config.ts";
 import { openContext } from "./core/context.ts";
 import { loadIntent, type Intent } from "./core/intent.ts";
 import { pollAll, refilter } from "./core/poller.ts";
-import { listRegisterNames, mergeIntents, registerFile, registerFromEnv, registerLabel } from "./core/registers.ts";
+import { DEFAULT_REGISTER, listRegisterNames, mergeIntents, registerFile, registerFromEnv, registerLabel } from "./core/registers.ts";
 import { Store } from "./core/store.ts";
 import { serve } from "./mcp/protocol.ts";
 import { createTools } from "./mcp/tools.ts";
@@ -89,16 +89,22 @@ async function main(argv: string[]): Promise<number> {
   const config = await loadConfig(join(home, "data/config.yaml"));
   // Every register, each by canonical URL; what the poll shares is their union, `list` shows one.
   const registers = listRegisterNames(home);
-  if (!registers.includes(register)) {
+  if (cmd === "list" && !registers.includes(register)) {
     console.error(`watcher: no such register: ${register} (registers: ${registers.join(", ")})`);
     return 2;
   }
   const entries = new Map<string, Intent>();
   for (const name of registers) {
     const label = registerLabel(name);
-    const { intent, unknown } = canonicalIntentFor(config, await loadIntent(join(home, registerFile(name)), label), label);
-    for (const url of unknown) console.error(`watcher: warning: ${label}: no configured instance recognizes ${url}; ignored`);
-    entries.set(name, intent);
+    try {
+      const { intent, unknown } = canonicalIntentFor(config, await loadIntent(join(home, registerFile(name)), label), label);
+      for (const url of unknown) console.error(`watcher: warning: ${label}: no configured instance recognizes ${url}; ignored`);
+      entries.set(name, intent);
+    } catch (err) {
+      // Only the file in use must be right: a broken other register is skipped, as the servers' poll does.
+      if (name === DEFAULT_REGISTER || (cmd === "list" && name === register)) throw err;
+      console.error(`watcher: warning: ${label} skipped: ${(err as Error).message}`);
+    }
   }
   const intent = mergeIntents([...entries.values()]);
   mkdirSync(join(home, "var"), { recursive: true });
@@ -117,7 +123,7 @@ async function main(argv: string[]): Promise<number> {
         return results.every((r) => r.ok) ? 0 : 1;
       }
       case "list": {
-        const items = listItems(store, entries.get(register)!, { unreadOnly: !values.all, includeMuted: values.muted, register });
+        const items = listItems(store, entries.get(register) ?? new Map(), { unreadOnly: !values.all, includeMuted: values.muted, register });
         for (const i of items) {
           const flags = `${i.unread ? "●" : " "}${i.priority === "important" ? "★" : " "}`;
           console.log(`${flags} ${i.repo}  ${i.title}  [${i.state}${i.ciState ? `, CI ${i.ciState}` : ""}]`);

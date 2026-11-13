@@ -44,17 +44,19 @@ test("registers: default first (even without its file), then the files of data/r
 const entry = (url: string, extra: Partial<IntentEntry> = {}): IntentEntry => ({ url, muted: false, manual: false, ...extra });
 const intent = (...entries: IntentEntry[]): Intent => new Map(entries.map((e) => [e.url, e]));
 
-test("merging registers: every URL once; important wins; else the first explicit priority", () => {
+test("merging registers: every URL once; important wins; else the priority all state; else none", () => {
   const merged = mergeIntents([
     intent(entry("https://a/1", { priority: "normal" }), entry("https://a/2"), entry("https://a/3", { priority: "normal" })),
     intent(entry("https://a/1", { priority: "important" }), entry("https://a/2", { priority: "normal" }), entry("https://a/3", { priority: "important" })),
-    intent(entry("https://a/3", { priority: "normal" }), entry("https://a/4")),
+    intent(entry("https://a/3", { priority: "normal" }), entry("https://a/4"), entry("https://a/5", { priority: "normal" })),
+    intent(entry("https://a/5", { priority: "normal" })),
   ]);
-  expect([...merged.keys()]).toEqual(["https://a/1", "https://a/2", "https://a/3", "https://a/4"]);
+  expect([...merged.keys()]).toEqual(["https://a/1", "https://a/2", "https://a/3", "https://a/4", "https://a/5"]);
   expect(merged.get("https://a/1")?.priority).toBe("important");
-  expect(merged.get("https://a/2")?.priority).toBe("normal");
+  expect(merged.get("https://a/2")?.priority).toBeUndefined(); // one says normal, one leaves it to the automatic rule
   expect(merged.get("https://a/3")?.priority).toBe("important");
   expect(merged.get("https://a/4")?.priority).toBeUndefined();
+  expect(merged.get("https://a/5")?.priority).toBe("normal");
 });
 
 test("merging registers: an entry is manual only if every register lists it as manual", () => {

@@ -125,11 +125,21 @@ test("a register that does not exist, or whose name is not a plain name, is refu
   expect(m.err).toContain("invalid register name");
 });
 
-test("a register file that cannot be read is named in the error", () => {
+test("a register file that cannot be read is named in the error when it is the one in use; for any other command it is skipped", () => {
   registerFiles({ "bad.yaml": "items:\n  - url: nope\n" });
-  const r = watcher("list");
+  const r = watcher("list", "--register", "bad");
   expect(r.code).toBe(1);
   expect(r.err).toContain("registers/bad.yaml: items[0]: invalid url");
+  const other = watcher("list", "--all");
+  expect(other.code).toBe(0);
+  expect(other.err).toContain("registers/bad.yaml skipped");
+  expect(watcher("refilter").code).toBe(0);
+});
+
+test("WATCHER_REGISTER naming a register that has no file only matters to the commands that read it", () => {
+  const run = (cmd: string[]) => Bun.spawnSync([process.execPath, join(import.meta.dir, "../src/cli.ts"), ...cmd], { env: { ...process.env, WATCHER_HOME: home, WATCHER_REGISTER: "houston" } });
+  expect(run(["seen", "--all"]).exitCode).toBe(0);
+  expect(run(["list"]).exitCode).toBe(2);
 });
 
 test("a URL no instance recognizes is warned about with its register's file name", () => {

@@ -1,6 +1,6 @@
 // Changes to a register other than `default`: its own file, its own commit, the same lock.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { addItem, changeIntent, type IntentRepo } from "../src/core/api.ts";
@@ -105,7 +105,18 @@ test("a register name that is not a plain name never reaches the file system", a
     await expect(addItem(where, store, new Map(), recognize, PR, undefined, bad)).rejects.toThrow("invalid register name");
   }
   expect(existsSync(join(home, "data/escape.yaml"))).toBe(false);
-  expect(git("rev-list", "--count", "HEAD")).toBe("1\n");
+  expect(Bun.spawnSync(["git", "-C", home, "rev-parse", "--verify", "-q", "refs/heads/config"]).exitCode).not.toBe(0); // nothing was committed
+});
+
+test("a link or a directory where a register's file should be is not written through", async () => {
+  writeFileSync(join(home, "outside.yaml"), "items: []\n");
+  symlinkSync(join(home, "outside.yaml"), join(home, "data/registers/link.yaml"));
+  mkdirSync(join(home, "data/registers/dir.yaml"));
+  for (const name of ["link", "dir"]) {
+    await expect(changeIntent(where, PR, { muted: true }, canonical, undefined, name)).rejects.toThrow(`registers/${name}.yaml is not a regular file`);
+    await expect(addItem(where, store, new Map(), recognize, PR, undefined, name)).rejects.toThrow("is not a regular file");
+  }
+  expect(file("outside.yaml")).toBe("items: []\n");
 });
 
 test("a duplicate found inside the lock names the register's file", async () => {
