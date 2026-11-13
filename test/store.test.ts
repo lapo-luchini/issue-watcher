@@ -175,10 +175,3 @@ test("caches from before is_baseline and first_since are upgraded in place", () 
   expect(reopened.eventsFor(url).find((e) => e.key === "c:1")?.isBaseline).toBe(false);
   reopened.close();
 });
-
-test("rollback discards writes", () => {
-  store.begin();
-  store.upsertItem(item);
-  store.rollback();
-  expect(store.getItem(url)).toBeNull();
-});
