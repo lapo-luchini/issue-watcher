@@ -1,5 +1,5 @@
 // The MCP tools against a temporary watcher home (a git repo), its cache and a fake forge.
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
