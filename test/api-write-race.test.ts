@@ -30,6 +30,53 @@ test("changes made by two processes at once are all kept, and each committed", a
   expect(committed.match(/note:/g)).toHaveLength(24);
 }, 60_000);
 
+// Every register file is written under the one lock: their commits all move the same branch, so a lock
+// per file would let two writers race that branch and one commit would be lost.
+const gitOut = (home: string, ...args: string[]) => Bun.spawnSync(["git", "-C", home, ...args]).stdout.toString();
+const spawnWriter = (home: string, tag: string, count: number, register?: string, start = "") =>
+  Bun.spawn([process.execPath, join(import.meta.dir, "items-writer.ts"), home, tag, String(count), start, register ?? ""], { stderr: "inherit" }).exited;
+const committedNotes = (home: string, file: string) => gitOut(home, "show", `config:${file}`).match(/note:/g)?.length ?? 0;
+
+test("two processes changing two different registers at once lose nothing, and every change is its own commit", async () => {
+  const home = newHome();
+  expect(await Promise.all([spawnWriter(home, "a", 12, "foo"), spawnWriter(home, "b", 12, "bar")])).toEqual([0, 0]);
+  for (const name of ["foo", "bar"]) {
+    expect(readFileSync(join(home, `data/registers/${name}.yaml`), "utf8").match(/note:/g)).toHaveLength(12);
+    expect(committedNotes(home, `data/registers/${name}.yaml`)).toBe(12);
+  }
+  expect(gitOut(home, "rev-list", "--count", "config")).toBe("25\n"); // init + 24 changes
+}, 60_000);
+
+test("two processes changing the same register at once lose nothing", async () => {
+  const home = newHome();
+  expect(await Promise.all([spawnWriter(home, "a", 12, "foo"), spawnWriter(home, "b", 12, "foo")])).toEqual([0, 0]);
+  expect(committedNotes(home, "data/registers/foo.yaml")).toBe(24);
+  expect(gitOut(home, "rev-list", "--count", "config")).toBe("25\n");
+}, 60_000);
+
+test("changes to default and to another register at once lose nothing", async () => {
+  const home = newHome();
+  expect(await Promise.all([spawnWriter(home, "a", 12), spawnWriter(home, "b", 12, "foo")])).toEqual([0, 0]);
+  expect(committedNotes(home, "data/items.yaml")).toBe(12);
+  expect(committedNotes(home, "data/registers/foo.yaml")).toBe(12);
+  expect(gitOut(home, "rev-list", "--count", "config")).toBe("25\n");
+}, 60_000);
+
+test("writers of different registers that all find the same stale lock do not both take it over", async () => {
+  const home = newHome();
+  for (let round = 1; round <= 8; round++) {
+    mkdirSync(join(home, "var"), { recursive: true });
+    writeFileSync(join(home, "var/items.lock"), "crashed");
+    const old = new Date(Date.now() - 180_000);
+    utimesSync(join(home, "var/items.lock"), old, old);
+    const start = String(Date.now() + 500);
+    await Promise.all(["foo", "bar", "baz", "default"].flatMap((r, i) => [spawnWriter(home, `r${round}a${i}`, 1, r, start), spawnWriter(home, `r${round}b${i}`, 1, r, start)]));
+  }
+  const total = ["data/items.yaml", "data/registers/foo.yaml", "data/registers/bar.yaml", "data/registers/baz.yaml"].reduce((n, f) => n + committedNotes(home, f), 0);
+  expect(total).toBe(8 * 8);
+  expect(gitOut(home, "rev-list", "--count", "config")).toBe(String(1 + 8 * 8) + "\n");
+}, 120_000);
+
 const notes = (home: string) => readFileSync(join(home, "data/items.yaml"), "utf8").match(/note:/g)?.length ?? 0;
 const lockFile = (home: string) => join(home, "var/items.lock");
 const makeLock = (home: string, content: string, ageSeconds: number) => {
