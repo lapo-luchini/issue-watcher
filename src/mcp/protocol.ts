@@ -102,10 +102,11 @@ async function dispatch(method: string, params: unknown, tools: ToolSet, info: S
 
 /**
  * Serves until `input` ends: one request at a time, in order, one JSON object per line each way.
- * `write` gets complete lines (with the newline); stdout must carry nothing else.
+ * `write` gets complete lines (with the newline) and may return a promise, awaited before going on
+ * (a pipe's buffer must be empty before the process exits); stdout must carry nothing else.
  */
 export async function serve(
-  input: AsyncIterable<Uint8Array | string>, write: (line: string) => void, tools: ToolSet, info: ServerInfo,
+  input: AsyncIterable<Uint8Array | string>, write: (line: string) => void | Promise<void>, tools: ToolSet, info: ServerInfo,
 ): Promise<void> {
   const decoder = new TextDecoder();
   let buffer = "";
@@ -113,7 +114,7 @@ export async function serve(
     const text = line.endsWith("\r") ? line.slice(0, -1) : line;
     if (text.trim() === "") return;
     const reply = await handleMessage(text, tools, info);
-    if (reply) write(JSON.stringify(reply) + "\n");
+    if (reply) await write(JSON.stringify(reply) + "\n");
   };
   for await (const chunk of input) {
     buffer += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });

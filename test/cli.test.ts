@@ -95,6 +95,22 @@ test("mcp: initialize, tools/list and tools/call over stdio; stdout is protocol 
   expect(seenAt()).toBeNull();
 });
 
+test("mcp: a long reply is written whole before the process exits", () => {
+  const store = new Store(join(home, "var/cache.sqlite"));
+  for (let i = 0; i < 1500; i++) {
+    const url = `https://github.com/foo/bar/issues/${i}`;
+    store.upsertItem({
+      url, id: itemId(url), instance: "github", kind: "issue", repo: "foo/bar", title: `${"long title ".repeat(10)}${i}`,
+      state: "open", stateDetail: null, ciState: null, hasConflicts: false, authoredByMe: false, maintainedByMe: false, labels: [],
+      lastSignalAt: null, lastSignalSummary: null, seenAt: null, baselineAt: "2026-11-01T00:00:00.000Z", fetchedAt: "2026-11-04T10:00:00.000Z", snapshotJson: null,
+    });
+  }
+  store.close();
+  const r = mcp([{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_items", arguments: {} } }]);
+  expect(r.code).toBe(0);
+  expect(JSON.parse(r.replies[0].result.content[0].text).items).toHaveLength(1501);
+});
+
 test("mcp: a missing config is a message on stderr, exit 1 and nothing on stdout", () => {
   const p = Bun.spawnSync([process.execPath, join(import.meta.dir, "../src/cli.ts"), "mcp"], { env: { ...process.env, WATCHER_HOME: join(home, "nowhere") } });
   expect(p.exitCode).toBe(1);

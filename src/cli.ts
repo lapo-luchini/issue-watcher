@@ -74,7 +74,7 @@ async function main(argv: string[]): Promise<number> {
     const ctx = await openContext(home);
     try {
       const tools = createTools(ctx);
-      await serve(Bun.stdin.stream(), (line) => process.stdout.write(line), tools, { name: "watcher", version: pkg.version });
+      await serve(Bun.stdin.stream(), async (line) => void (await Bun.write(Bun.stdout, line)), tools, { name: "watcher", version: pkg.version });
       await tools.idle(); // stdin closed while a poll started by the assistant runs: let it finish
     } finally {
       ctx.store.close();

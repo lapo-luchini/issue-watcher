@@ -17,7 +17,7 @@ const tools: ToolSet = {
 /** Feeds `chunks` to a server and returns the parsed lines it wrote. */
 async function run(chunks: (string | Uint8Array)[]): Promise<any[]> {
   const out: string[] = [];
-  await serve((async function* () { yield* chunks; })(), (l) => out.push(l), tools, info);
+  await serve((async function* () { yield* chunks; })(), (l) => void out.push(l), tools, info);
   for (const l of out) expect(l.endsWith("\n") && !l.slice(0, -1).includes("\n")).toBe(true); // one object per line
   return out.map((l) => JSON.parse(l));
 }
@@ -82,7 +82,7 @@ test("requests are handled one at a time, in order", async () => {
     },
   };
   const out: string[] = [];
-  await serve((async function* () { yield req(1, "tools/call", { name: "a" }) + req(2, "tools/call", { name: "b" }); })(), (l) => out.push(l), slow, info);
+  await serve((async function* () { yield req(1, "tools/call", { name: "a" }) + req(2, "tools/call", { name: "b" }); })(), (l) => void out.push(l), slow, info);
   expect(order).toEqual(["start a", "end a", "start b", "end b"]);
   expect(out.map((l) => JSON.parse(l).id)).toEqual([1, 2]);
 });
