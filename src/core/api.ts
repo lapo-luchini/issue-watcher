@@ -250,8 +250,8 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timin
   mkdirSync(dirname(lock), { recursive: true });
   const token = `${lockHolder()} ${randomUUID()}`;
   const mine = `${lock}.${token.split(" ")[1]}`;
-  writeFileSync(mine, token);
   try {
+    writeFileSync(mine, token); // inside the try: a write that fails half way leaves no token file
     for (const deadline = Date.now() + waitMs; ; await Bun.sleep(25)) {
       dropLeftovers(lock, mine, staleMs);
       touch(mine); // the lock and a break claim are this same file: their age counts from now, not from when we began to wait

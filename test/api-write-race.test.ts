@@ -291,3 +291,21 @@ test("a waiter whose break claim was replaced meanwhile does not remove the new 
   }
   expect(readFileSync(claim, "utf8")).toBe(`${lockHolder()} other`);
 });
+
+test("a token file that cannot be written is not left behind", async () => {
+  const home = newHome();
+  const real = fs.writeFileSync;
+  const spy = spyOn(fs, "writeFileSync").mockImplementation(((path: fs.PathOrFileDescriptor, data: unknown, ...rest: unknown[]) => {
+    if (String(path).includes("items.lock.")) {
+      real(path, "par"); // partial write, then the disk is full
+      throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    }
+    return (real as (...a: unknown[]) => void)(path, data, ...rest);
+  }) as typeof fs.writeFileSync);
+  try {
+    await expect(withItemsLock(home, async () => {})).rejects.toThrow("ENOSPC");
+  } finally {
+    spy.mockRestore();
+  }
+  expect(leftovers(home)).toEqual([]);
+});
