@@ -1,8 +1,8 @@
 // Editing items.yaml (comments and order preserved) and committing it.
-import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { addEntry, commitFile, committedContent, editIntent, parseIntent } from "../src/core/intent.ts";
 
 const text = `# My overrides: keep this comment.
@@ -17,6 +17,8 @@ items:
 `;
 /** Canonicalizes like an adapter would: drops a trailing PR tab. */
 const canon = (url: string) => url.replace(/\/files$/, "");
+
+afterEach(cleanupTmp);
 
 test("editIntent changes an existing entry in place, keeping comments and order", () => {
   const out = editIntent(text, "https://github.com/foo/bar/pull/42", { note: "merged upstream?", muted: true }, canon);
@@ -74,7 +76,7 @@ test("addEntry adds a manual item with its title, or a forge item to track, and 
 
 /** A throwaway git repository with an identity, holding data/items.yaml. */
 async function tempRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "watcher-git-"));
+  const dir = tmpDir("git");
   for (const args of [["init", "-q"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.org"]]) {
     expect(Bun.spawnSync(["git", "-C", dir, ...args]).exitCode).toBe(0);
   }
@@ -136,7 +138,7 @@ test("commitFile in a repository with no commit yet starts the branch from scrat
 });
 
 test("commitFile outside a git repository is a warning", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "watcher-nogit-"));
+  const dir = tmpDir("nogit");
   writeFileSync(join(dir, "items.yaml"), "items: []\n");
   const r = await commitFile(dir, "items.yaml", "watcher: x", "config");
   expect(r.ok).toBe(false);
