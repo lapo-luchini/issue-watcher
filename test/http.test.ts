@@ -81,3 +81,13 @@ test("getAllPages follows Link headers and applies pick", async () => {
   expect(await getAllPages<number>("http://x/", {}, deps, (b) => b.items)).toEqual([1, 2, 3]);
   expect(calls).toEqual(["http://x/", "http://x/?page=2"]);
 });
+
+test("a 403 whose body names a rate limit is a RateLimitError even without rate-limit headers", async () => {
+  // GitHub's secondary rate limits.
+  const limited = new Response('{"message":"You have exceeded a secondary rate limit. Please wait."}', { status: 403 });
+  expect(await getJson("http://x/", {}, fakeHttp([limited]).deps).catch((e) => e)).toBeInstanceOf(RateLimitError);
+  const denied = new Response('{"message":"Resource not accessible by integration"}', { status: 403 });
+  const err = await getJson("http://x/", {}, fakeHttp([denied]).deps).catch((e) => e);
+  expect(err).toBeInstanceOf(HttpError);
+  expect(err).not.toBeInstanceOf(RateLimitError);
+});
