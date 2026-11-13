@@ -243,3 +243,51 @@ test("discover: notifications forbidden (fine-grained token) is skipped", async 
   });
   expect(await adapter.discover(since)).toEqual([]);
 });
+
+/** Fake GitHub serving `pages` pages of a paged list: each page links to the next, and to the last. */
+function pagedGitHub(pathOf: (page: number) => string, pages: number, body: (page: number) => unknown, routes: Record<string, unknown>) {
+  const http: HttpDeps = {
+    fetchFn: async (url) => {
+      const path = url.slice(API.length);
+      for (let p = 1; p <= pages; p++) {
+        if (path !== pathOf(p)) continue;
+        const link = [
+          p < pages ? `<${API}${pathOf(p + 1)}>; rel="next"` : "",
+          `<${API}${pathOf(pages)}>; rel="last"`,
+        ].filter(Boolean).join(", ");
+        return Response.json(body(p), { headers: { link } });
+      }
+      const route = routes[path];
+      return route === undefined ? new Response(`no route for ${path}`, { status: 404 }) : Response.json(route);
+    },
+    sleep: async () => {},
+    retries: 0,
+    timeoutMs: 1000,
+  };
+  return new GitHubAdapter(inst, http);
+}
+
+test("discover: more than 20 notification pages do not fail discovery, the first 20 are delivered", async () => {
+  const since = new Date("2026-11-04T10:00:00.000Z");
+  const when = "updated:>=2026-11-04T10:00:00Z";
+  const base = `/notifications?all=true&per_page=50&since=${encodeURIComponent(since.toISOString())}`;
+  const adapter = pagedGitHub((p) => (p === 1 ? base : `${base}&page=${p}`), 21,
+    (p) => [{ subject: { url: `https://api.github.com/repos/k/l/issues/${p}` } }],
+    { [search("involves", when)]: { items: [] }, [search("review-requested", when)]: { items: [] }, [search("reviewed-by", when)]: { items: [] } });
+  const refs = await adapter.discover(since);
+  expect(refs).toHaveLength(20);
+  expect(refs.at(-1)?.url).toBe("https://github.com/k/l/issues/20");
+});
+
+test("fetch: an issue with 21 timeline pages keeps its new state and its newest comment", async () => {
+  const tl = "/repos/foo/bar/issues/7/timeline?per_page=100";
+  const adapter = pagedGitHub((p) => (p === 1 ? tl : `${tl}&page=${p}`), 21,
+    (p) => [{ event: "commented", id: p, actor: { login: "maint" }, user: { login: "maint" }, author_association: "MEMBER",
+      created_at: new Date(Date.UTC(2026, 10, 1, 0, p)).toISOString(), body: `comment ${p}` }],
+    { "/repos/foo/bar/issues/7": { title: "Long thread", state: "closed", state_reason: "completed", user: { login: "x" }, labels: [],
+      created_at: "2026-10-01T00:00:00Z", updated_at: "2026-11-02T00:00:00Z" } });
+  const snap = await adapter.fetch({ url: "https://github.com/foo/bar/issues/7", instance: "github", kind: "issue" });
+  expect(snap.state).toBe("closed");
+  expect(snap.events.map((e) => e.key)).toContain("c:21");
+  expect(snap.events).toHaveLength(20);
+});
