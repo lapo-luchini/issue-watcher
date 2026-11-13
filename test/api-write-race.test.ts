@@ -1,5 +1,6 @@
 // Two processes (say the web server and `watcher mcp`) changing items.yaml at the same time.
 import { afterEach, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
@@ -251,4 +252,19 @@ test("a waiter that does not win the break claim leaves the stale lock to the on
   breakIfStale(lockFile(home), mine, 60_000, 10_000);
   expect(readFileSync(lockFile(home), "utf8")).toBe(dead);
   expect(readFileSync(`${lockFile(home)}.break`, "utf8")).toBe(`${lockHolder()} claim`);
+});
+
+test("an error from linking the lock other than 'it exists' is thrown at once, not waited out", async () => {
+  const home = newHome();
+  const broken = spyOn(fs, "linkSync").mockImplementation(() => {
+    throw Object.assign(new Error("EMLINK: too many links"), { code: "EMLINK" });
+  });
+  const t0 = Date.now();
+  try {
+    await expect(withItemsLock(home, async () => {}, { waitMs: 5000 })).rejects.toThrow("EMLINK");
+  } finally {
+    broken.mockRestore();
+  }
+  expect(Date.now() - t0).toBeLessThan(1000);
+  expect(leftovers(home)).toEqual([]); // our token file went too
 });
