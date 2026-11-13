@@ -1,4 +1,7 @@
 import { beforeEach, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEFAULT_FILTER, type Config, type InstanceConfig } from "../src/core/config.ts";
 import { GoneError, RateLimitError } from "../src/core/http.ts";
 import { parseIntent } from "../src/core/intent.ts";
@@ -367,4 +370,58 @@ test("pollAll: an item first seen on an incremental run reports events after the
   refilter(store, config, new Map());
   expect(store.getItem(ISSUE)).toMatchObject({ lastSignalAt: minutes(30).toISOString(), lastSignalSummary: "review request by @maint" });
   expect(unread(other)).toBe(false);
+});
+
+test("pollAll: a dry run does not block other writers to the cache while it fetches", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "watcher-poll-"));
+  const polling = new Store(join(dir, "cache.sqlite"));
+  const other = new Store(join(dir, "cache.sqlite"));
+  other.db.exec("PRAGMA busy_timeout = 0;"); // fail at once instead of after the usual wait
+  const urls = [1, 2].map((n) => `https://github.com/foo/bar/pull/${n}`);
+  adapter.discovered = urls.map((url) => ({ url, instance: "github", kind: "pr" }));
+  let blocked: unknown = null;
+  adapter.fetch = async (ref: ItemRef) => {
+    // After a macrotask the first item is applied (the dry run has written) while the second is still being fetched.
+    if (ref.url === urls[1]) {
+      await new Promise((resolve) => setImmediate(resolve));
+      try {
+        other.markAllSeen(T0.toISOString());
+      } catch (err) {
+        blocked = err;
+      }
+    }
+    return snapshot(ref.url, []);
+  };
+  try {
+    await pollAll({ ...ctx, store: polling }, { dryRun: true });
+    expect(blocked).toBeNull();
+  } finally {
+    polling.close();
+    other.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pollAll: a dry run needs no temp directory and leaves the poll lock free", async () => {
+  adapter.discovered = [{ url: PR, instance: "github", kind: "pr" }];
+  adapter.snapshots.set(PR, snapshot(PR, []));
+  const saved = process.env.TMPDIR;
+  process.env.TMPDIR = "/nonexistent-watcher-tmp";
+  try {
+    const results = await pollAll(ctx, { dryRun: true });
+    expect(results[0]).toMatchObject({ ok: true, fetched: 1 });
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = saved;
+  }
+  expect(store.lockHeld("poll", T0)).toBe(false);
+  expect(store.getItem(PR)).toBeNull(); // still a dry run
+});
+
+test("pollAll: a dry run that fails to copy the cache releases the poll lock", async () => {
+  store.memoryCopy = () => {
+    throw new Error("out of memory");
+  };
+  await expect(pollAll(ctx, { dryRun: true })).rejects.toThrow("out of memory");
+  expect(store.lockHeld("poll", T0)).toBe(false);
 });

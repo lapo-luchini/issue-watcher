@@ -160,10 +160,11 @@ function toEvent(r: any): EventRow {
 export class Store {
   readonly db: Database;
 
-  constructor(path: string) {
+  /** `source` is a file path, or the bytes of a serialized database (an in-memory copy). */
+  constructor(source: string | Uint8Array) {
     // strict: named parameters are bound without the "$" prefix and missing ones throw.
-    this.db = new Database(path, { create: true, strict: true });
-    this.db.exec("PRAGMA journal_mode = WAL;");
+    this.db = typeof source === "string" ? new Database(source, { create: true, strict: true }) : Database.deserialize(source, { strict: true });
+    if (typeof source === "string") this.db.exec("PRAGMA journal_mode = WAL;");
     // A poll and a CLI/web command may write at the same time: wait for the lock instead of failing.
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
@@ -367,12 +368,13 @@ export class Store {
     this.db.query("DELETE FROM locks WHERE name = $name").run({ name });
   }
 
-  begin(): void {
-    this.db.exec("BEGIN");
-  }
-
-  rollback(): void {
-    this.db.exec("ROLLBACK");
+  /** A consistent in-memory copy of the whole cache: writes to it never touch the file, and there is nothing to clean up. */
+  memoryCopy(): Store {
+    const bytes = this.db.serialize();
+    // The header of a WAL file says so (format versions, bytes 18-19), which an in-memory database cannot open for writing.
+    bytes[18] = 1;
+    bytes[19] = 1;
+    return new Store(bytes);
   }
 
   close(): void {

@@ -4,7 +4,7 @@ import { classify } from "./filter.ts";
 import { GoneError, RateLimitError } from "./http.ts";
 import { effectivePriority, type Intent } from "./intent.ts";
 import type { Adapter, ItemRef, NormalizedEvent, Snapshot } from "./model.ts";
-import { itemId, lockHolder, type EventRow, type ItemRow, type Store } from "./store.ts";
+import { itemId, lockHolder, Store, type EventRow, type ItemRow } from "./store.ts";
 import { summarize } from "./summary.ts";
 
 /** Each run re-queries this much before the cursor, to tolerate clock skew; event keys dedup the overlap. */
@@ -41,13 +41,16 @@ export async function pollAll(ctx: PollContext, opts: { only?: string; dryRun?: 
   const instances = ctx.config.instances.filter((i) => !opts.only || i.id === opts.only);
   if (opts.only && instances.length === 0) throw new Error(`unknown instance '${opts.only}'`);
   if (!ctx.store.acquireLock("poll", lockHolder(), now())) throw new Error("a poll is already running");
-  if (opts.dryRun) ctx.store.begin(); // everything below is rolled back at the end
+  // A dry run works on a private in-memory copy of the cache, so it never holds the real file's
+  // write lock across its network I/O and leaves nothing behind, however it ends.
+  let dryStore: Store | null = null;
   try {
+    if (opts.dryRun) dryStore = ctx.store.memoryCopy();
     const results: InstanceResult[] = [];
-    for (const inst of instances) results.push(await pollInstance(inst, ctx));
+    for (const inst of instances) results.push(await pollInstance(inst, dryStore ? { ...ctx, store: dryStore } : ctx));
     return results;
   } finally {
-    if (opts.dryRun) ctx.store.rollback();
+    dryStore?.close();
     ctx.store.releaseLock("poll", lockHolder()); // not a lock taken over after ours went stale
   }
 }
