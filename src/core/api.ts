@@ -227,14 +227,6 @@ export interface IntentRepo {
   branch: string; // Config.commitBranch
 }
 
-/**
- * Runs `fn` holding `<home>/var/items.lock`, so that two processes (the web server, `watcher mcp`)
- * never edit items.yaml at once: each would read the file before the other's change and lose it.
- * The file holds its owner's token and is created complete (linked into place). While `fn` runs its
- * owner refreshes the file's mtime; a lock not refreshed for a minute, or left by a process that has
- * exited, is a crashed process's and is taken over, by one waiting process at a time. The lock is
- * released only while it still holds our token.
- */
 /** Times in ms; tests shorten them. */
 export interface LockTiming {
   waitMs: number;
@@ -244,6 +236,14 @@ export interface LockTiming {
 }
 const LOCK_TIMING: LockTiming = { waitMs: 30_000, staleMs: 60_000, beatMs: 10_000, claimMs: 10_000 };
 
+/**
+ * Runs `fn` holding `<home>/var/items.lock`, so that two processes (the web server, `watcher mcp`)
+ * never edit items.yaml at once: each would read the file before the other's change and lose it.
+ * The file holds its owner's token and is created complete (linked into place). While `fn` runs its
+ * owner refreshes the file's mtime; a lock not refreshed for a minute, or left by a process that has
+ * exited, is a crashed process's and is taken over, by one waiting process at a time. The lock is
+ * released only while it still holds our token.
+ */
 export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timing: Partial<LockTiming> = {}): Promise<T> {
   const { waitMs, staleMs, beatMs, claimMs } = { ...LOCK_TIMING, ...timing };
   const lock = join(home, "var/items.lock");
@@ -254,9 +254,9 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timin
   try {
     for (const deadline = Date.now() + waitMs; ; await Bun.sleep(25)) {
       dropLeftovers(lock, mine, staleMs);
+      touch(mine); // the lock and a break claim are this same file: their age counts from now, not from when we began to wait
       try {
         linkSync(mine, lock); // fails when the lock exists
-        touch(lock); // its age counts from now, not from when we began to wait
         break;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
@@ -338,7 +338,6 @@ function unlinkIfStale(path: string, staleMs: number): void {
  */
 export function breakIfStale(lock: string, mine: string, staleMs: number, claimMs: number): void {
   const claim = `${lock}.break`;
-  touch(mine); // the claim is the same file: its age counts from now, not from when the wait began
   try {
     linkSync(mine, claim);
   } catch {
