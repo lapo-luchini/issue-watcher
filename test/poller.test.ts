@@ -368,3 +368,40 @@ test("pollAll: an item first seen on an incremental run reports events after the
   expect(store.getItem(ISSUE)).toMatchObject({ lastSignalAt: minutes(30).toISOString(), lastSignalSummary: "review request by @maint" });
   expect(unread(other)).toBe(false);
 });
+
+test("a fetch that fails halfway through applying keeps its news for the retry", async () => {
+  adapter.discovered = [{ url: ISSUE, instance: "github", kind: "issue" }];
+  const old = comment("c:1", minutes(-600), "maintainer", "old history");
+  adapter.snapshots.set(ISSUE, snapshot(ISSUE, [old]));
+  await pollAll(ctx);
+  clock = minutes(60);
+  const news = comment("c:2", minutes(30), "maintainer", "Please rebase, then I merge");
+  const broken = comment("c:3", new Date("not a date"), "contributor", "malformed timestamp", "bob");
+  adapter.snapshots.set(ISSUE, snapshot(ISSUE, [old, news, broken]));
+  const [failed] = await pollAll(ctx);
+  expect(failed).toMatchObject({ ok: false, fetched: 0 });
+  clock = minutes(80);
+  adapter.snapshots.set(ISSUE, snapshot(ISSUE, [old, news]));
+  const [retry] = await pollAll(ctx);
+  expect(retry).toMatchObject({ ok: true, newSignals: 1 });
+  expect(unread(ISSUE)).toBe(true);
+});
+
+test("a fetch that fails halfway through applying prints none of its rolled-back news", async () => {
+  const lines: string[] = [];
+  adapter.discovered = [{ url: ISSUE, instance: "github", kind: "issue" }];
+  const old = comment("c:1", minutes(-600), "maintainer", "old history");
+  adapter.snapshots.set(ISSUE, snapshot(ISSUE, [old]));
+  await pollAll(ctx);
+  clock = minutes(60);
+  const news = comment("c:2", minutes(30), "maintainer", "Please rebase, then I merge");
+  const broken = comment("c:3", new Date("not a date"), "contributor", "malformed timestamp", "bob");
+  adapter.snapshots.set(ISSUE, snapshot(ISSUE, [old, news, broken]));
+  const [failed] = await pollAll({ ...ctx, log: (l) => lines.push(l) });
+  expect(failed).toMatchObject({ ok: false, fetched: 0 });
+  expect(lines.filter((l) => l.includes("Please rebase"))).toEqual([]);
+  clock = minutes(80);
+  adapter.snapshots.set(ISSUE, snapshot(ISSUE, [old, news]));
+  await pollAll({ ...ctx, log: (l) => lines.push(l) });
+  expect(lines.filter((l) => l.includes("Please rebase"))).toHaveLength(1);
+});
