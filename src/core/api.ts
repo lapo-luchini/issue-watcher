@@ -260,7 +260,10 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timin
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
         breakIfStale(lock, mine, staleMs, claimMs);
-        if (Date.now() > deadline) throw new Error(`items.yaml is locked by another process (${lock})`);
+        if (Date.now() > deadline) {
+          console.error(`watcher: ${lock} is held by another process`); // the message goes to the assistant: no path in it
+          throw new Error("items.yaml is being changed by another process; try again");
+        }
       }
     }
   } finally {

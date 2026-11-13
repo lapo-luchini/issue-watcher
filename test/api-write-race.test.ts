@@ -1,5 +1,5 @@
 // Two processes (say the web server and `watcher mcp`) changing items.yaml at the same time.
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
@@ -95,7 +95,11 @@ test("waiting for a lock that is never let go ends in an error after the time gi
   const home = newHome();
   makeLock(home, lockHolder(), 5);
   const t0 = Date.now();
-  await expect(withItemsLock(home, async () => {}, { waitMs: 300 })).rejects.toThrow("items.yaml is locked by another process");
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  const failure = await withItemsLock(home, async () => {}, { waitMs: 300 }).catch((e) => e);
+  expect(failure.message).toBe("items.yaml is being changed by another process; try again"); // no path for the assistant to see
+  expect(logged).toHaveBeenCalledWith(`watcher: ${lockFile(home)} is held by another process`);
+  logged.mockRestore();
   expect(Date.now() - t0).toBeGreaterThanOrEqual(300);
   expect(readFileSync(lockFile(home), "utf8")).toBe(lockHolder()); // still the other's
   expect(leftovers(home)).toEqual([]);

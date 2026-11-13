@@ -241,7 +241,12 @@ export function createTools(ctx: Context, opts: ToolsOptions = {}): WatcherTools
         } catch (err) {
           throw new ToolError((err as Error).message);
         }
-        const r = await changeIntent(where, item.url, change, ctx.canonical, item.instance ? item.repo : undefined);
+        let r;
+        try {
+          r = await changeIntent(where, item.url, change, ctx.canonical, item.instance ? item.repo : undefined);
+        } catch (err) {
+          throw new ToolError((err as Error).message);
+        }
         return { item: itemOut(await findItem(item.id)), warning: r.warning ?? null };
       },
     },

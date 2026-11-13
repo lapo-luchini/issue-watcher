@@ -1,6 +1,6 @@
 // The MCP tools against a temporary watcher home (a git repo), its cache and a fake forge.
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { openContext, type Context } from "../src/core/context.ts";
@@ -226,6 +226,16 @@ test("update_item: validated as the page does, written to items.yaml and committ
     const err = await tools.call("update_item", args).catch((e) => e);
     expect(err).toBeInstanceOf(ToolError);
     expect(err.message).toContain(message);
+  }
+});
+
+test("update_item: a change that cannot be written is a tool error the assistant sees, as add_item's is", async () => {
+  await open("mcp:\n  read_only: false\n");
+  chmodSync(join(home, "var"), 0o500); // the lock cannot be created
+  try {
+    expect(await tools.call("update_item", { item: PR, muted: false }).catch((e) => e)).toBeInstanceOf(ToolError);
+  } finally {
+    chmodSync(join(home, "var"), 0o700);
   }
 });
 
