@@ -365,3 +365,17 @@ test("without a token no key is sent", async () => {
   await adapter.fetch(ref);
   expect(calls.some((c) => c.includes("api_key"))).toBe(false);
 });
+
+test("an error page that echoes the request URL does not leak the API key", async () => {
+  const token = "s3cr&t/key";
+  const echo = async (url: string) => new Response(`Bad request: ${url}\nraw: ${token}`, { status: 400 });
+  const http = { fetchFn: echo, sleep: async () => {}, retries: 0, timeoutMs: 1000 };
+  const adapter = new BugzillaAdapter({ ...inst, token }, http);
+  for (const run of [() => adapter.fetch(ref), () => adapter.discover(null)]) {
+    const err = await run().catch((e) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err.message).toContain("Bad request");
+    expect(err.message).not.toContain(token);
+    expect(err.message).not.toContain(encodeURIComponent(token));
+  }
+});
