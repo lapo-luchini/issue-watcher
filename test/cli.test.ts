@@ -1,15 +1,17 @@
 // End-to-end checks of CLI argument handling, against a throwaway WATCHER_HOME (no network).
-import { beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { itemId, Store } from "../src/core/store.ts";
 
 const PR = "https://github.com/foo/bar/pull/42";
 let home: string;
 
+afterEach(cleanupTmp);
+
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "watcher-cli-"));
+  home = tmpDir("cli");
   mkdirSync(join(home, "data"));
   mkdirSync(join(home, "var"));
   writeFileSync(join(home, "data/config.yaml"), "instances:\n  - {id: github, type: github, url: https://api.github.com, user: lapo}\n");
