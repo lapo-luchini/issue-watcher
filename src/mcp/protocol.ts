@@ -100,31 +100,57 @@ async function dispatch(method: string, params: unknown, tools: ToolSet, info: S
   }
 }
 
+/** A line longer than this (in characters) is refused, so that a client that never sends a newline cannot fill the memory. */
+export const MAX_LINE = 16 * 1024 * 1024;
+
 /**
  * Serves until `input` ends: one request at a time, in order, one JSON object per line each way.
  * `write` gets complete lines (with the newline) and may return a promise, awaited before going on
  * (a pipe's buffer must be empty before the process exits); stdout must carry nothing else.
+ * A line over `maxLine` is answered with a parse error (id null) and the rest of it skipped.
  */
 export async function serve(
-  input: AsyncIterable<Uint8Array | string>, write: (line: string) => void | Promise<void>, tools: ToolSet, info: ServerInfo,
+  input: AsyncIterable<Uint8Array | string>, write: (line: string) => void | Promise<void>, tools: ToolSet, info: ServerInfo, maxLine = MAX_LINE,
 ): Promise<void> {
   const decoder = new TextDecoder();
-  let buffer = "";
+  let parts: string[] = []; // the unfinished line, in the pieces it arrived in: nothing is joined or rescanned until it is complete
+  let size = 0;
+  let skipping = false; // inside a line that was too long: dropped up to its newline
+  const reply = async (r: Reply | null) => {
+    if (r) await write(JSON.stringify(r) + "\n");
+  };
+  const tooLong = async () => {
+    parts = [];
+    size = 0;
+    await reply(fail(null, PARSE_ERROR, `line longer than ${maxLine} characters`));
+  };
   const handle = async (line: string) => {
     const text = line.endsWith("\r") ? line.slice(0, -1) : line;
-    if (text.trim() === "") return;
-    const reply = await handleMessage(text, tools, info);
-    if (reply) await write(JSON.stringify(reply) + "\n");
+    if (text.trim() !== "") await reply(await handleMessage(text, tools, info));
   };
-  for await (const chunk of input) {
-    buffer += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
-    let end: number;
-    while ((end = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, end);
-      buffer = buffer.slice(end + 1);
-      await handle(line);
+  const feed = async (text: string) => {
+    for (let at = 0; at < text.length; ) {
+      const end = text.indexOf("\n", at); // only the new part is searched
+      const piece = text.slice(at, end < 0 ? text.length : end);
+      at = end < 0 ? text.length : end + 1;
+      if (!skipping) {
+        parts.push(piece);
+        size += piece.length;
+        if (size > maxLine) {
+          await tooLong();
+          skipping = end < 0; // a newline in this very piece ends the long line
+        } else if (end >= 0) {
+          const line = parts.join("");
+          parts = [];
+          size = 0;
+          await handle(line);
+        }
+      } else if (end >= 0) {
+        skipping = false;
+      }
     }
-  }
-  buffer += decoder.decode();
-  await handle(buffer); // a last line without its newline
+  };
+  for await (const chunk of input) await feed(typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true }));
+  await feed(decoder.decode());
+  if (!skipping) await handle(parts.join("")); // a last line without its newline
 }

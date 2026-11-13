@@ -15,9 +15,9 @@ const tools: ToolSet = {
 };
 
 /** Feeds `chunks` to a server and returns the parsed lines it wrote. */
-async function run(chunks: (string | Uint8Array)[]): Promise<any[]> {
+async function run(chunks: (string | Uint8Array)[], maxLine?: number): Promise<any[]> {
   const out: string[] = [];
-  await serve((async function* () { yield* chunks; })(), (l) => void out.push(l), tools, info);
+  await serve((async function* () { yield* chunks; })(), (l) => void out.push(l), tools, info, maxLine);
   for (const l of out) expect(l.endsWith("\n") && !l.slice(0, -1).includes("\n")).toBe(true); // one object per line
   return out.map((l) => JSON.parse(l));
 }
@@ -104,4 +104,33 @@ test("a character split between two chunks arrives whole", async () => {
   const cut = bytes.indexOf(0xe2) + 1; // inside the euro sign's three bytes
   const r = await run([bytes.slice(0, cut), bytes.slice(cut)]);
   expect(r).toEqual([{ jsonrpc: "2.0", id: "€", result: {} }]);
+});
+
+const ping = (id: number) => req(id, "ping");
+const TOO_LONG = { jsonrpc: "2.0", id: null, error: { code: -32700, message: expect.stringContaining("line longer than") } };
+
+test("a line over the limit is refused with one parse error and skipped to its newline, wherever the limit is crossed", async () => {
+  const long = "x".repeat(100);
+  const ok = { jsonrpc: "2.0", id: 2, result: {} };
+  // The line arrives in pieces and ends in a later chunk; the limit is crossed in the first.
+  expect(await run([long.slice(0, 60), long.slice(60, 80), long.slice(80) + "\n" + ping(2)], 50)).toEqual([TOO_LONG, ok]);
+  // The limit is crossed by the piece that holds the newline.
+  expect(await run([long + "\n" + ping(2)], 50)).toEqual([TOO_LONG, ok]);
+  // Not ended at all.
+  expect(await run([long.slice(0, 60), long.slice(60)], 50)).toEqual([TOO_LONG]);
+  // Several chunks later still skipped, then normal again (and a skipped line's tail is no message).
+  expect(await run([long, long, long + "\n" + ping(2) + long + "\n" + ping(3)], 50)).toEqual([TOO_LONG, ok, TOO_LONG, { ...ok, id: 3 }]);
+});
+
+test("a line of exactly the limit is handled", async () => {
+  const line = ping(1).trimEnd();
+  expect(await run([line.slice(0, 10), line.slice(10) + "\n"], line.length)).toEqual([{ jsonrpc: "2.0", id: 1, result: {} }]);
+  expect(await run([line + "\n"], line.length - 1)).toEqual([TOO_LONG]);
+});
+
+test("20 MiB without a newline, in 64 KiB chunks: refused at the 16 MiB limit, the next request still answered", async () => {
+  const chunk = "y".repeat(64 * 1024);
+  const chunks = Array.from({ length: 320 }, () => chunk);
+  chunks.push("\n" + ping(7));
+  expect(await run(chunks)).toEqual([TOO_LONG, { jsonrpc: "2.0", id: 7, result: {} }]);
 });
