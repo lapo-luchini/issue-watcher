@@ -182,3 +182,16 @@ test("rollback discards writes", () => {
   store.rollback();
   expect(store.getItem(url)).toBeNull();
 });
+
+test("signalEventsDetectedAfter: news only, by detection time, strictly after, newest first", () => {
+  store.upsertItem(item);
+  const ev = (key: string, over: Partial<EventRow>) => store.insertEvent({ ...event, key, ...over });
+  ev("old", { detectedAt: "2026-11-02T00:00:00.000Z" });
+  ev("late", { at: "2026-10-01T00:00:00.000Z", approxAt: null, detectedAt: "2026-11-06T00:00:00.000Z" }); // happened long ago, detected late
+  ev("new", { detectedAt: "2026-11-07T00:00:00.000Z" });
+  ev("noise", { detectedAt: "2026-11-08T00:00:00.000Z", isSignal: false, reason: "noise:+1" });
+  ev("baseline", { detectedAt: "2026-11-09T00:00:00.000Z", isBaseline: true });
+  expect(store.signalEventsDetectedAfter("2026-11-02T00:00:00.000Z").map((e) => e.key)).toEqual(["new", "late"]);
+  expect(store.signalEventsDetectedAfter("2026-11-07T00:00:00.000Z")).toEqual([]);
+  expect(store.signalEventsDetectedAfter("2026-01-01T00:00:00.000Z").map((e) => e.key)).toEqual(["new", "late", "old"]);
+});

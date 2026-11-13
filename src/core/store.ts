@@ -268,6 +268,15 @@ export class Store {
       .all({ itemUrl }).map(toEvent);
   }
 
+  /**
+   * The news (signal events, baseline history excluded) first stored after `since`, newest
+   * detection first. By detection time, not the event's own: events that reach us late are included.
+   */
+  signalEventsDetectedAfter(since: string): EventRow[] {
+    return this.db.query(`SELECT * FROM events WHERE is_signal = 1 AND is_baseline = 0 AND detected_at > $since
+      ORDER BY detected_at DESC, item_url, event_key`).all({ since }).map(toEvent);
+  }
+
   setVerdict(itemUrl: string, key: string, v: Verdict): void {
     this.db.query("UPDATE events SET is_signal = $isSignal, reason = $reason WHERE item_url = $itemUrl AND event_key = $key")
       .run({ itemUrl, key, isSignal: v.isSignal ? 1 : 0, reason: v.reason });

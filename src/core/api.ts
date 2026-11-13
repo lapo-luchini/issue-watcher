@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
-import { itemId, type Store } from "./store.ts";
+import { itemId, type EventRow, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
 
 export interface ItemView {
@@ -99,13 +99,40 @@ export interface EventView {
   isBaseline: boolean;
 }
 
-/** An item's events, newest first: signal only, or noise too (with the filter's reason). */
-export function itemEvents(store: Store, url: string, includeNoise: boolean): EventView[] {
-  return store.eventsFor(url, includeNoise).map((e) => ({
+function eventView(e: EventRow): EventView {
+  return {
     key: e.key, kind: e.kind, actor: e.actor, actorRole: e.actorRole,
     at: e.approxAt ?? e.at, reportedAt: e.approxAt ? e.at : null, detectedAt: e.detectedAt,
     summary: summarize(e), details: e.details, excerpt: e.excerpt, isSignal: e.isSignal, reason: e.reason, isBaseline: e.isBaseline,
-  }));
+  };
+}
+
+/** An item's events, newest first: signal only, or noise too (with the filter's reason). */
+export function itemEvents(store: Store, url: string, includeNoise: boolean): EventView[] {
+  return store.eventsFor(url, includeNoise).map(eventView);
+}
+
+export interface ItemUpdates {
+  item: ItemView;
+  events: EventView[]; // newest detection first
+}
+
+/**
+ * The news the watcher detected after `since`, grouped by item, the item with the latest detection
+ * first; muted items are left out. By detection time rather than the event's own, so changes that
+ * reach the watcher late (Radicle) are not missed.
+ */
+export function updates(store: Store, intent: Intent, since: Date): ItemUpdates[] {
+  const items = new Map(listItems(store, intent).map((v) => [v.url, v]));
+  const groups = new Map<string, ItemUpdates>();
+  for (const e of store.signalEventsDetectedAfter(since.toISOString())) {
+    const item = items.get(e.itemUrl);
+    if (!item) continue; // muted (or no longer listed)
+    let group = groups.get(item.url);
+    if (!group) groups.set(item.url, (group = { item, events: [] }));
+    group.events.push(eventView(e));
+  }
+  return [...groups.values()]; // the store's order puts the item with the latest detection first
 }
 
 export interface InstanceStatus {
