@@ -143,3 +143,14 @@ test("a break claim older than a minute is dropped even when its process still r
   await withItemsLock(home, async () => {});
   expect(Date.now() - t0).toBeLessThan(2000);
 });
+
+test("the file of a process killed before it could link or drop its lock is cleaned up by the next; a live one's is not", async () => {
+  const home = newHome();
+  mkdirSync(join(home, "var"), { recursive: true });
+  const orphan = join(home, "var/items.lock.11111111-2222-3333-4444-555555555555");
+  const live = join(home, "var/items.lock.66666666-7777-8888-9999-000000000000");
+  writeFileSync(orphan, `${lockHolder(Bun.spawnSync(["true"]).pid)} 11111111-2222-3333-4444-555555555555`);
+  writeFileSync(live, `${lockHolder()} 66666666-7777-8888-9999-000000000000`);
+  await withItemsLock(home, async () => {});
+  expect(leftovers(home)).toEqual([live.split("/").pop()!]);
+});

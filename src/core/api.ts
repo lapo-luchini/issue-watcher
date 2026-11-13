@@ -1,8 +1,8 @@
 // Query/command API shared by every front end (CLI, HTTP server; an MCP server later).
 // Front ends never touch the Store or items.yaml directly.
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
@@ -255,9 +255,22 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, waitM
     drop(mine);
   }
   try {
+    dropLeftovers(lock, mine);
     return await fn();
   } finally {
     if (readOrNull(lock) === token) drop(lock); // else taken over as stale
+  }
+}
+
+/** A process killed before it dropped its `<lock>.<token>` file leaves it behind: those of exited processes go. */
+function dropLeftovers(lock: string, mine: string): void {
+  const start = `${basename(lock)}.`;
+  for (const name of readdirSync(dirname(lock))) {
+    const path = join(dirname(lock), name);
+    if (!name.startsWith(start) || !/^[0-9a-f-]{36}$/.test(name.slice(start.length)) || path === mine) continue;
+    try {
+      if (isStale(path)) unlinkSync(path);
+    } catch {} // gone meanwhile
   }
 }
 
