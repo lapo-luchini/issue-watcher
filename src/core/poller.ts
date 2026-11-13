@@ -94,8 +94,13 @@ export async function pollInstance(inst: InstanceConfig, ctx: PollContext): Prom
       const itemSince = retrySince.has(ref.url) ? (retrySince.get(ref.url) ?? null) : since;
       try {
         const snap = await adapter.fetch(ref);
+        // One transaction per item (a savepoint inside a dry run): a failure half way leaves no
+        // events behind that the retry would then take for known. Its news is printed only once
+        // committed, else the retry would print it again.
+        const news: string[] = [];
+        result.newSignals += ctx.store.transaction(() => applySnapshot(snap, ctx, now(), itemSince, (line) => news.push(line)));
+        for (const line of news) log(line);
         result.fetched++;
-        result.newSignals += applySnapshot(snap, ctx, now(), itemSince, log);
         ctx.store.clearRetry(inst.id, ref.url);
       } catch (err) {
         if (err instanceof GoneError) {

@@ -367,6 +367,15 @@ export class Store {
     this.db.query("DELETE FROM locks WHERE name = $name").run({ name });
   }
 
+  /**
+   * Runs `fn` in one transaction: all its writes, or none if it throws. BEGIN IMMEDIATE takes the
+   * write lock first (waiting up to busy_timeout), so a read followed by a write cannot fail at
+   * once when another connection commits in between. Inside a transaction it is a savepoint.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn).immediate();
+  }
+
   begin(): void {
     this.db.exec("BEGIN");
   }
