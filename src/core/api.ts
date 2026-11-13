@@ -1,6 +1,7 @@
 // Query/command API shared by every front end (CLI, HTTP server; an MCP server later).
 // Front ends never touch the Store or items.yaml directly.
-import { join } from "node:path";
+import { closeSync, mkdirSync, openSync, statSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
@@ -225,7 +226,40 @@ export interface IntentRepo {
   branch: string; // Config.commitBranch
 }
 
+/**
+ * Runs `fn` holding `<home>/var/items.lock`, so that two processes (the web server, `watcher mcp`)
+ * never edit items.yaml at once: each would read the file before the other's change and lose it.
+ * A lock older than a minute is a crashed process's and is taken over.
+ */
+async function withItemsLock<T>(home: string, fn: () => Promise<T>): Promise<T> {
+  const lock = join(home, "var/items.lock");
+  mkdirSync(dirname(lock), { recursive: true });
+  for (const deadline = Date.now() + 30_000; ; await Bun.sleep(25)) {
+    try {
+      closeSync(openSync(lock, "wx"));
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > 60_000) unlinkSync(lock);
+      } catch {} // released meanwhile
+      if (Date.now() > deadline) throw new Error(`items.yaml is locked by another process (${lock})`);
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    try {
+      unlinkSync(lock);
+    } catch {} // taken over as stale
+  }
+}
+
 async function rewriteItems(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
+  return withItemsLock(where.home, () => rewriteLocked(where, edit, message));
+}
+
+async function rewriteLocked(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
   const path = join(where.home, ITEMS_FILE);
   const file = Bun.file(path);
   const before = (await file.exists()) ? await file.text() : "";
