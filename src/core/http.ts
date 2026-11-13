@@ -81,20 +81,49 @@ export function nextLink(link: string | null): string | null {
   return link?.match(/<([^>]+)>;\s*rel="next"/)?.[1] ?? null;
 }
 
-/** Fetches every page and concatenates the arrays `pick` extracts from each body. */
+/** The rel="last" URL of an RFC 8288 Link header. */
+function lastLink(link: string | null): string | null {
+  return link?.match(/<([^>]+)>;\s*rel="last"/)?.[1] ?? null;
+}
+
+export interface PageOptions {
+  /** Pages to read before giving up (default 20). */
+  maxPages?: number;
+  /** Past maxPages, throw instead of returning what was read. For oldest-first lists, where the dropped pages hold the newest entries. */
+  strict?: boolean;
+  /** Oldest-first list with a rel="last" link: read its last maxPages pages, so the newest entries survive. */
+  tail?: boolean;
+}
+
+/** Fetches every page and concatenates the arrays `pick` extracts from each body; newest-first lists may be truncated at maxPages. */
 export async function getAllPages<T>(
   url: string,
   headers: Record<string, string>,
   deps: HttpDeps = defaultHttp,
   pick: (body: any) => T[] = (body) => body,
-  maxPages = 20,
+  { maxPages = 20, strict = false, tail = false }: PageOptions = {},
 ): Promise<T[]> {
   const out: T[] = [];
-  let next: string | null = url;
-  for (let page = 0; next && page < maxPages; page++) {
-    const res: JsonResponse<unknown> = await getJson<unknown>(next, headers, deps);
+  let res: JsonResponse<unknown> = await getJson<unknown>(url, headers, deps);
+  if (tail) {
+    const last = lastLink(res.headers.get("link"));
+    const lastPage = Number(last && new URL(last).searchParams.get("page"));
+    if (last && lastPage > maxPages) {
+      for (let page = lastPage - maxPages + 1; page <= lastPage; page++) {
+        const u = new URL(last);
+        u.searchParams.set("page", String(page));
+        out.push(...pick((await getJson<unknown>(u.toString(), headers, deps)).data));
+      }
+      return out;
+    }
+  }
+  out.push(...pick(res.data));
+  let next = nextLink(res.headers.get("link"));
+  for (let page = 1; next && page < maxPages; page++) {
+    res = await getJson<unknown>(next, headers, deps);
     out.push(...pick(res.data));
     next = nextLink(res.headers.get("link"));
   }
+  if (next && strict) throw new Error(`more than ${maxPages} pages at ${url}`);
   return out;
 }

@@ -1,6 +1,6 @@
 // GitLab (gitlab.com or self-hosted, e.g. invent.kde.org), via its /api/v4 base URL.
 import type { InstanceConfig } from "../core/config.ts";
-import { defaultHttp, getAllPages, getJson, type HttpDeps } from "../core/http.ts";
+import { defaultHttp, getAllPages, getJson, type HttpDeps, type PageOptions } from "../core/http.ts";
 import type { ActorRole, Adapter, CiState, ItemKind, ItemRef, ItemState, NormalizedEvent, Snapshot } from "../core/model.ts";
 import { forgeDate, mentions, notGone, optional, parseUrl } from "./util.ts";
 
@@ -48,6 +48,9 @@ const DAY_MS = 86_400_000;
 /** The API path segment of each item kind. */
 const API_KIND: Record<string, string> = { pr: "merge_requests", issue: "issues" };
 
+/** Item endpoints are oldest first: fail rather than hide the newest entries past the page cap. */
+const STRICT: PageOptions = { strict: true };
+
 export class GitLabAdapter implements Adapter {
   private readonly web: string; // web base URL, no trailing slash
   private readonly webPrefix: string; // its path part: "" or e.g. "/gitlab" for a sub-path install
@@ -75,8 +78,8 @@ export class GitLabAdapter implements Adapter {
     return (await getJson<T>(this.inst.url + path, this.headers(), this.http)).data;
   }
 
-  private all<T>(path: string): Promise<T[]> {
-    return getAllPages<T>(this.inst.url + path, this.headers(), this.http);
+  private all<T>(path: string, opts?: PageOptions): Promise<T[]> {
+    return getAllPages<T>(this.inst.url + path, this.headers(), this.http, undefined, opts);
   }
 
   /**
@@ -215,10 +218,10 @@ export class GitLabAdapter implements Adapter {
     const { project, iid } = this.parts(ref);
     const base = `/projects/${encodeURIComponent(project)}/${API_KIND[ref.kind]}/${iid}`;
     const item = await this.get<GlItem>(base); // a 404 here (GoneError) means the item is gone
-    const notes = await notGone(this.all<GlNote>(`${base}/notes?sort=asc&per_page=100`));
-    const states = await notGone(this.all<GlResourceEvent>(`${base}/resource_state_events?per_page=100`));
-    const labels = await notGone(this.all<GlResourceEvent>(`${base}/resource_label_events?per_page=100`));
-    const milestones = await notGone(this.all<GlResourceEvent>(`${base}/resource_milestone_events?per_page=100`));
+    const notes = await notGone(this.all<GlNote>(`${base}/notes?sort=asc&per_page=100`, STRICT));
+    const states = await notGone(this.all<GlResourceEvent>(`${base}/resource_state_events?per_page=100`, STRICT));
+    const labels = await notGone(this.all<GlResourceEvent>(`${base}/resource_label_events?per_page=100`, STRICT));
+    const milestones = await notGone(this.all<GlResourceEvent>(`${base}/resource_milestone_events?per_page=100`, STRICT));
 
     const people = [...notes.map((n) => n.author), ...[...states, ...labels, ...milestones].map((e) => e.user)];
     const roles = await this.roles(project, people);

@@ -1,6 +1,6 @@
 // GitHub (github.com, or GitHub Enterprise via its /api/v3 base URL).
 import type { InstanceConfig } from "../core/config.ts";
-import { defaultHttp, getAllPages, getJson, HttpError, RateLimitError, type HttpDeps } from "../core/http.ts";
+import { defaultHttp, getAllPages, getJson, HttpError, RateLimitError, type HttpDeps, type PageOptions } from "../core/http.ts";
 import type { ActorRole, Adapter, CiState, ItemRef, ItemState, NormalizedEvent, Snapshot } from "../core/model.ts";
 import { forgeDate, notGone, optional, parseUrl } from "./util.ts";
 
@@ -68,8 +68,8 @@ export class GitHubAdapter implements Adapter {
     return (await getJson<T>(this.inst.url + path, this.headers(), this.http)).data;
   }
 
-  private all<T>(path: string, pick?: (body: any) => T[]): Promise<T[]> {
-    return getAllPages<T>(this.inst.url + path, this.headers(), this.http, pick);
+  private all<T>(path: string, pick?: (body: any) => T[], opts?: PageOptions): Promise<T[]> {
+    return getAllPages<T>(this.inst.url + path, this.headers(), this.http, pick, opts);
   }
 
   /** Also accepts URLs copied from the browser: a PR tab (/files, /commits, /checks), a query, a #fragment. */
@@ -127,7 +127,7 @@ export class GitHubAdapter implements Adapter {
     const [, owner, repo, , num] = new URL(ref.url).pathname.split("/"); // "/o/r/pull/5"
     const base = `/repos/${owner}/${repo}`;
     const issue = await this.get<GhIssue>(`${base}/issues/${num}`);
-    const timeline = await notGone(this.all<GhTimelineEvent>(`${base}/issues/${num}/timeline?per_page=100`));
+    const timeline = await notGone(this.all<GhTimelineEvent>(`${base}/issues/${num}/timeline?per_page=100`, undefined, { tail: true }));
     const events = timeline.flatMap((e) => this.mapTimeline(e));
     let state: ItemState = issue.state === "open" ? "open" : "closed";
     let ciState: CiState | null = null;
@@ -138,7 +138,7 @@ export class GitHubAdapter implements Adapter {
       // "unknown" (or missing) while GitHub recomputes mergeability in the background.
       const ms = pr.mergeable_state;
       hasConflicts = ms === undefined || ms === "unknown" ? null : ms === "dirty";
-      const commits = await notGone(this.all<GhCommit>(`${base}/pulls/${num}/commits?per_page=100`));
+      const commits = await notGone(this.all<GhCommit>(`${base}/pulls/${num}/commits?per_page=100`, undefined, { tail: true }));
       for (const c of commits) events.push(this.mapCommit(c));
       ciState = await notGone(this.ciState(base, pr.head.sha));
     }
