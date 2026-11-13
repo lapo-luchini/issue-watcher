@@ -253,6 +253,7 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timin
   writeFileSync(mine, token);
   try {
     for (const deadline = Date.now() + waitMs; ; await Bun.sleep(25)) {
+      dropLeftovers(lock, mine, staleMs);
       try {
         linkSync(mine, lock); // fails when the lock exists
         touch(lock); // its age counts from now, not from when we began to wait
@@ -276,7 +277,6 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timin
     } catch {} // released meanwhile
   }, beatMs);
   try {
-    dropLeftovers(lock, mine, staleMs);
     return await fn();
   } finally {
     clearInterval(beat);
@@ -284,7 +284,7 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timin
   }
 }
 
-/** A process killed before it dropped its `<lock>.<token>` file leaves it behind: those of exited processes go. */
+/** A process killed before it dropped its `<lock>.<token>` file leaves it behind: those of stale holders go. */
 function dropLeftovers(lock: string, mine: string, staleMs: number): void {
   const start = `${basename(lock)}.`;
   for (const name of readdirSync(dirname(lock))) {

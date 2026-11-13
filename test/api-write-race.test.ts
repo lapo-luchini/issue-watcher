@@ -161,6 +161,28 @@ test("the file of a process killed before it could link or drop its lock is clea
   expect(leftovers(home)).toEqual([live.split("/").pop()!]);
 });
 
+test("a writer waiting for the lock clears the leftovers of killed writers meanwhile, and only those", async () => {
+  const home = newHome();
+  makeLock(home, lockHolder(), 5);
+  const dead = lockHolder(Bun.spawnSync(["true"]).pid);
+  const var_ = (name: string) => join(home, "var", name);
+  const zeros = "00000000-0000-0000-0000-000000000000";
+  const old = new Date(Date.now() - 120_000);
+  // Left by killed waiters: gone (one name has zeros, which a uuid has).
+  writeFileSync(var_(`items.lock.${zeros}`), `${dead} ${zeros}`);
+  // Not ours to touch, however old or dead: other files, a name that is not a uuid, 36 characters that are not hex (and a live process's break claim).
+  const others = ["cache.sqlite", "items.lock.notauuid", `items.lock.${"z".repeat(36)}`];
+  writeFileSync(var_("items.lock.break"), `${lockHolder()} claim`);
+  for (const name of others) {
+    writeFileSync(var_(name), `${dead} x`);
+    utimesSync(var_(name), old, old);
+  }
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  await withItemsLock(home, async () => {}, { waitMs: 300 }).catch(() => {});
+  logged.mockRestore();
+  expect(readdirSync(join(home, "var")).sort()).toEqual([...others, "items.lock", "items.lock.break"].sort());
+});
+
 test("a lock's age starts when it is taken, not when its holder began to wait", async () => {
   const home = newHome();
   makeLock(home, lockHolder(), 5);
