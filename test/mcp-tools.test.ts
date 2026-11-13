@@ -488,8 +488,7 @@ test("poll fetches the entries of every register, once", async () => {
   tools = createTools(ctx, { adapterFor: () => knowsOther, now: () => NOW });
   addRegister("houston", `items:\n  - url: ${OTHER}\n`);
   addRegister("other", `items:\n  - url: ${OTHER}\n`);
-  writeFileSync(join(home, "data/items.yaml"), `items:\n  - url: ${OTHER}\n`);
-  await call("poll");
+  await call("poll"); // default has no entry for it
   await tools.idle();
   expect(fetched.filter((u) => u === OTHER)).toEqual([OTHER]);
 });

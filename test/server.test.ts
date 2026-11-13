@@ -171,7 +171,8 @@ test("POST /api/items?register= adds the item to that register, creating it; the
 
 test("a poll fetches the entries of every register, once", async () => {
   addRegister(`items:\n  - url: ${OTHER}\n  - url: ${ISSUE}\n`);
-  writeFileSync(join(home, "data/items.yaml"), `items:\n  - url: ${OTHER}\n`);
+  mkdirSync(join(home, "data/registers"), { recursive: true });
+  writeFileSync(join(home, "data/registers/second.yaml"), `items:\n  - url: ${OTHER}\n`); // default has neither
   await send("POST", "/api/poll", {});
   await srv.idle();
   expect(fetched.sort()).toEqual([ISSUE, OTHER].sort()); // OTHER is in both, ISSUE in a register and found by discovery
