@@ -210,7 +210,7 @@ export async function startServer(opts: ServerOptions) {
         }),
       },
       "/api/status": {
-        GET: route(() => json({ instances: instanceStatus(store, config), polling: polling !== null, lastPoll })),
+        GET: route(() => json({ instances: instanceStatus(store, config), polling: polling !== null || store.lockHeld("poll", now()), lastPoll })),
       },
       "/api/*": route(() => {
         throw new HttpError(404, "no such API endpoint");
