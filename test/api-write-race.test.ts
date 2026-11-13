@@ -268,3 +268,26 @@ test("an error from linking the lock other than 'it exists' is thrown at once, n
   expect(Date.now() - t0).toBeLessThan(1000);
   expect(leftovers(home)).toEqual([]); // our token file went too
 });
+
+test("a waiter whose break claim was replaced meanwhile does not remove the new claim", () => {
+  const home = newHome();
+  makeLock(home, `${lockHolder(Bun.spawnSync(["true"]).pid)}`, 5); // stale: its holder has exited
+  const claim = `${lockFile(home)}.break`;
+  const mine = join(home, "var/items.lock.00000000-0000-0000-0000-000000000002");
+  writeFileSync(mine, `${lockHolder()} x`);
+  const real = fs.unlinkSync;
+  // While the waiter works on the lock its claim is judged stale by another waiter, which takes a claim of its own.
+  const spy = spyOn(fs, "unlinkSync").mockImplementation(((path: fs.PathLike) => {
+    if (path === lockFile(home)) {
+      real(claim);
+      writeFileSync(claim, `${lockHolder()} other`);
+    }
+    return real(path);
+  }) as typeof fs.unlinkSync);
+  try {
+    breakIfStale(lockFile(home), mine, 60_000, 10_000);
+  } finally {
+    spy.mockRestore();
+  }
+  expect(readFileSync(claim, "utf8")).toBe(`${lockHolder()} other`);
+});

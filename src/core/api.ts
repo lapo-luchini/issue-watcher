@@ -346,10 +346,13 @@ export function breakIfStale(lock: string, mine: string, staleMs: number, claimM
     } catch {} // released meanwhile
     return;
   }
+  const ino = statSync(mine).ino; // the claim is a link to our file
   try {
     unlinkIfStale(lock, staleMs);
   } catch {} // released meanwhile
-  drop(claim);
+  try {
+    if (statSync(claim).ino === ino) unlinkSync(claim); // still ours: after a stall another waiter may have judged it stale and taken its own
+  } catch {} // already gone
 }
 
 async function rewriteItems(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
