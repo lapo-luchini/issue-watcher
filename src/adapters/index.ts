@@ -54,6 +54,6 @@ export function urlRecognizer(config: Config): (url: string) => ItemRef | null {
 }
 
 /** items.yaml keyed by canonical URL; `unknown` lists the non-manual URLs no instance recognizes. */
-export function canonicalIntentFor(config: Config, intent: Intent): { intent: Intent; unknown: string[] } {
-  return canonicalizeIntent(intent, urlRecognizer(config));
+export function canonicalIntentFor(config: Config, intent: Intent, file?: string): { intent: Intent; unknown: string[] } {
+  return canonicalizeIntent(intent, urlRecognizer(config), file);
 }

@@ -45,3 +45,59 @@ test("openContext: a missing config fails before anything is created", async () 
   await expect(openContext(dir)).rejects.toThrow("config file not found");
   expect(Bun.file(join(dir, "var/cache.sqlite")).size).toBe(0);
 });
+
+const PR = "https://github.com/foo/bar/pull/42";
+
+async function withRegisters(files: Record<string, string>, body: (ctx: Awaited<ReturnType<typeof openContext>>, dir: string) => Promise<void>) {
+  const dir = home(CONFIG);
+  mkdirSync(join(dir, "data/registers"), { recursive: true });
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  const ctx = await openContext(dir);
+  try {
+    await body(ctx, dir);
+  } finally {
+    ctx.store.close();
+  }
+}
+
+test("openContext: a register is read from its file, by canonical URL, and does not see the others", async () => {
+  await withRegisters({
+    "data/items.yaml": `items:\n  - url: ${PR}\n    muted: true\n`,
+    "data/registers/houston.yaml": `items:\n  - url: ${PR}/files\n    priority: important\n    note: n\n`,
+  }, async (ctx) => {
+    expect(ctx.registers()).toEqual(["default", "houston"]);
+    const houston = await ctx.intent("houston");
+    expect([...houston.keys()]).toEqual([PR]);
+    expect(houston.get(PR)).toMatchObject({ priority: "important", muted: false, note: "n" });
+    expect((await ctx.intent("default")).get(PR)?.muted).toBe(true);
+    expect((await ctx.intent()).get(PR)?.muted).toBe(true);
+  });
+});
+
+test("openContext: a register that has no file is an error; default without its file is empty", async () => {
+  await withRegisters({}, async (ctx) => {
+    expect((await ctx.intent("default")).size).toBe(0);
+    await expect(ctx.intent("nope")).rejects.toThrow("no such register: nope");
+    await expect(ctx.intent("../x")).rejects.toThrow("invalid register name");
+  });
+});
+
+test("openContext: a register file that cannot be read names itself, not items.yaml", async () => {
+  await withRegisters({ "data/registers/bad.yaml": "items:\n  - url: nope\n" }, async (ctx) => {
+    await expect(ctx.intent("bad")).rejects.toThrow("registers/bad.yaml: items[0]: invalid url");
+    await expect(ctx.allIntent()).rejects.toThrow("registers/bad.yaml");
+  });
+});
+
+test("openContext: the entries of every register as one, read on every call", async () => {
+  await withRegisters({
+    "data/items.yaml": `items:\n  - url: ${PR}\n`,
+    "data/registers/a.yaml": `items:\n  - url: ${PR}\n    priority: important\n  - url: https://github.com/foo/bar/issues/1\n`,
+  }, async (ctx, dir) => {
+    const all = await ctx.allIntent();
+    expect([...all.keys()].sort()).toEqual(["https://github.com/foo/bar/issues/1", PR]);
+    expect(all.get(PR)?.priority).toBe("important");
+    writeFileSync(join(dir, "data/registers/b.yaml"), "items:\n  - url: https://github.com/foo/bar/issues/2\n");
+    expect((await ctx.allIntent()).size).toBe(3);
+  });
+});
