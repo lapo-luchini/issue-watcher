@@ -8,7 +8,7 @@ import {
 import type { InstanceConfig } from "./core/config.ts";
 import { openContext } from "./core/context.ts";
 import type { IntentChange } from "./core/intent.ts";
-import type { Adapter, Priority } from "./core/model.ts";
+import type { Adapter } from "./core/model.ts";
 import { pollAll, type InstanceResult } from "./core/poller.ts";
 
 export interface ServerOptions {
