@@ -120,7 +120,7 @@ export function lockHolder(pid: number = process.pid): string {
  * True when `holder` is a process of this host and PID space that has exited. Other hosts,
  * namespaces, boots and formats cannot be checked from here: false.
  */
-function holderIsGone(holder: string): boolean {
+export function holderIsGone(holder: string): boolean {
   const m = holder.match(/^(\d+)@([^#]+)(?:#(.*))?$/);
   if (!m || m[2] !== hostname() || (m[3] ?? "") !== PID_SPACE) return false;
   try {

@@ -56,6 +56,15 @@ test("a lock taken over while its first holder still ran is not released by that
   expect(readFileSync(lockFile(home), "utf8")).toBe("someone else");
 });
 
+test("a lock left by a process that has exited is taken over at once", async () => {
+  const home = newHome();
+  const gone = Bun.spawnSync(["true"]);
+  makeLock(home, lockHolder(gone.pid), 5);
+  const t0 = Date.now();
+  await withItemsLock(home, async () => {});
+  expect(Date.now() - t0).toBeLessThan(2000);
+}, 10_000);
+
 test("a recent lock of a live process is waited for", async () => {
   const home = newHome();
   makeLock(home, lockHolder(), 5);

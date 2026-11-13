@@ -1,12 +1,12 @@
 // Query/command API shared by every front end (CLI, HTTP server; an MCP server later).
 // Front ends never touch the Store or items.yaml directly.
 import { randomUUID } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
-import { itemId, lockHolder, type EventRow, type Store } from "./store.ts";
+import { holderIsGone, itemId, lockHolder, type EventRow, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
 
 export interface ItemView {
@@ -231,7 +231,7 @@ export interface IntentRepo {
  * Runs `fn` holding `<home>/var/items.lock`, so that two processes (the web server, `watcher mcp`)
  * never edit items.yaml at once: each would read the file before the other's change and lose it.
  * The file holds its owner's token and is created complete (linked into place). A lock older than
- * a minute is a crashed process's and is taken over, by one
+ * a minute, or left by a process that has exited, is a crashed process's and is taken over, by one
  * waiting process at a time. The lock is released only while it still holds our token.
  */
 export async function withItemsLock<T>(home: string, fn: () => Promise<T>): Promise<T> {
@@ -275,7 +275,15 @@ function drop(path: string): void {
   } catch {} // already gone
 }
 
-const isStale = (path: string): boolean => Date.now() - statSync(path).mtimeMs > 60_000;
+/** Older than a minute, or held by a process of this host that has exited (its token starts with its pid). */
+function isStale(path: string): boolean {
+  const fd = openSync(path, "r"); // one file for both the age and the token
+  try {
+    return Date.now() - fstatSync(fd).mtimeMs > 60_000 || holderIsGone(readFileSync(fd, "utf8").split(" ")[0]!);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /**
  * Removes `lock` when it is stale. Whoever links `<lock>.break` is the one to look at the lock and
