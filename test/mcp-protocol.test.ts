@@ -1,6 +1,6 @@
 // The JSON-RPC layer of the MCP server, over in-memory streams and a fake tool set.
 import { expect, test } from "bun:test";
-import { INVALID_PARAMS, RpcError, serve, ToolError, type ToolSet } from "../src/mcp/protocol.ts";
+import { INVALID_PARAMS, MAX_LINE, RpcError, serve, ToolError, type ToolSet } from "../src/mcp/protocol.ts";
 
 const info = { name: "watcher", version: "9.9.9" };
 
@@ -133,4 +133,43 @@ test("20 MiB without a newline, in 64 KiB chunks: refused at the 16 MiB limit, t
   const chunks = Array.from({ length: 320 }, () => chunk);
   chunks.push("\n" + ping(7));
   expect(await run(chunks)).toEqual([TOO_LONG, { jsonrpc: "2.0", id: 7, result: {} }]);
+});
+
+const PONG = (id: number) => ({ jsonrpc: "2.0", id, result: {} });
+/** A valid ping request of exactly `n` characters (padded in a params field). */
+const pingOf = (id: number, n: number) => {
+  const head = `{"jsonrpc":"2.0","id":${id},"method":"ping","params":{"p":"`;
+  const tail = '"}}';
+  return head + "a".repeat(n - head.length - tail.length) + tail;
+};
+
+test("the limit is per line: many valid lines whose total passes it are all answered, and one of exactly the limit follows", async () => {
+  const limit = 80;
+  // Five lines of 70 characters: together far over the limit, each under it.
+  const lines = [1, 2, 3, 4, 5].map((i) => pingOf(i, 70) + "\n");
+  expect(await run(lines, limit)).toEqual([1, 2, 3, 4, 5].map(PONG));
+  // After a short line, a line of exactly the limit is handled (the count restarts at 0, not at 1).
+  expect(await run([pingOf(1, 70) + "\n", pingOf(2, limit) + "\n"], limit)).toEqual([PONG(1), PONG(2)]);
+});
+
+test("after a refused line whose newline comes in a later chunk, the next line of exactly the limit is handled", async () => {
+  const limit = 80;
+  expect(await run(["x".repeat(limit + 20), "\n" + pingOf(4, limit) + "\n"], limit)).toEqual([TOO_LONG, PONG(4)]);
+});
+
+test("a line that starts with a carriage return is read whole (only a trailing one is dropped)", async () => {
+  expect(await run(["\r" + pingOf(5, 70) + "\n"])).toEqual([PONG(5)]);
+  expect(await run([pingOf(6, 70) + "\r\n"])).toEqual([PONG(6)]);
+});
+
+test("the default limit is 16 MiB: a line of exactly that many characters is handled, one more is refused", async () => {
+  expect(MAX_LINE).toBe(16 * 1024 * 1024);
+  const chunks = (line: string) => {
+    const out: string[] = [];
+    for (let i = 0; i < line.length; i += 1 << 20) out.push(line.slice(i, i + (1 << 20)));
+    out.push("\n");
+    return out;
+  };
+  expect(await run(chunks(pingOf(8, MAX_LINE)))).toEqual([PONG(8)]);
+  expect(await run(chunks(pingOf(8, MAX_LINE + 1)))).toEqual([TOO_LONG]);
 });
