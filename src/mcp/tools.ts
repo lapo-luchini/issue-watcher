@@ -3,7 +3,7 @@
 // tools are neither listed nor callable then, an unknown tool as far as the client can tell.
 import { createAdapter } from "../adapters/index.ts";
 import {
-  addItem, changeIntent, instanceStatus, ItemsBusyError, itemEvents, listItems, markSeen, parseIntentChange, updates,
+  addItem, changeIntent, instanceStatus, ItemRefusedError, ItemsBusyError, itemEvents, listItems, markSeen, parseIntentChange, updates,
   type EventView, type ItemView,
 } from "../core/api.ts";
 import type { InstanceConfig } from "../core/config.ts";
@@ -72,6 +72,14 @@ function parseSince(text: string): Date {
 }
 
 // ---- Result shapes ----
+
+// What a failed write tells the assistant: a busy lock or a refused URL as they are; anything else
+// (fs and git messages carry paths) only to stderr.
+function writeFailure(tool: string, err: unknown): ToolError {
+  if (err instanceof ItemsBusyError || err instanceof ItemRefusedError) return new ToolError(err.message);
+  console.error(`watcher: ${tool} failed: ${(err as Error).message}`);
+  return new ToolError("could not write items.yaml");
+}
 
 function itemOut(v: ItemView) {
   return {
@@ -245,9 +253,7 @@ export function createTools(ctx: Context, opts: ToolsOptions = {}): WatcherTools
         try {
           r = await changeIntent(where, item.url, change, ctx.canonical, item.instance ? item.repo : undefined);
         } catch (err) {
-          if (err instanceof ItemsBusyError) throw new ToolError(err.message);
-          console.error(`watcher: update_item failed: ${(err as Error).message}`); // fs and git messages carry paths: not for the assistant
-          throw new ToolError("could not write items.yaml");
+          throw writeFailure("update_item", err);
         }
         return { item: itemOut(await findItem(item.id)), warning: r.warning ?? null };
       },
@@ -268,7 +274,7 @@ export function createTools(ctx: Context, opts: ToolsOptions = {}): WatcherTools
           const r = await addItem(where, store, known, ctx.recognize, url, title);
           return { url: r.url, manual: r.manual, warning: r.commit.warning ?? null };
         } catch (err) {
-          throw new ToolError((err as Error).message);
+          throw writeFailure("add_item", err);
         }
       },
     },

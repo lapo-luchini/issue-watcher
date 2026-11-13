@@ -236,6 +236,8 @@ export interface LockTiming {
 }
 /** The items lock stayed with another process: its message is path-free and may be shown to anyone. */
 export class ItemsBusyError extends Error {}
+/** `addItem` refused the URL; the message names only what the caller passed, so it may be shown. */
+export class ItemRefusedError extends Error {}
 const LOCK_TIMING: LockTiming = { waitMs: 30_000, staleMs: 60_000, beatMs: 10_000, claimMs: 10_000 };
 
 /**
@@ -394,10 +396,10 @@ export function changeIntent(
 export function addItem(
   where: IntentRepo, store: Store, intent: Intent, recognize: (url: string) => ItemRef | null, url: string, title?: string,
 ): Promise<{ url: string; manual: boolean; commit: CommitResult }> {
-  if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) return Promise.reject(new Error(`not a web URL: ${url}`));
+  if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) return Promise.reject(new ItemRefusedError(`not a web URL: ${url}`));
   const ref = recognize(url);
   const canonical = ref?.url ?? url;
-  if (intent.has(canonical) || store.getItem(canonical)) return Promise.reject(new Error(`already tracked: ${canonical}`));
+  if (intent.has(canonical) || store.getItem(canonical)) return Promise.reject(new ItemRefusedError(`already tracked: ${canonical}`));
   const manual = !ref;
   const message = `watcher: add ${manual ? "manual item " : ""}${itemLabel(canonical)}`;
   return serialized(async () => ({

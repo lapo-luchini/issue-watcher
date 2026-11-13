@@ -268,6 +268,24 @@ test("add_item: a tracked or a manual item; one already tracked is an error", as
   }
 });
 
+test("add_item: a refusal is told as it is; a write error (it carries paths) goes to stderr", async () => {
+  await open("mcp:\n  read_only: false\n");
+  const refused = await tools.call("add_item", { url: "not a url" }).catch((e) => e);
+  expect(refused).toBeInstanceOf(ToolError);
+  expect(refused.message).toBe("not a web URL: not a url");
+  chmodSync(join(home, "data/items.yaml"), 0o400); // writing the file fails with its path in the message
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const err = await tools.call("add_item", { url: "https://lists.example.org/p3", title: "x" }).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    expect(err.message).toBe("could not write items.yaml");
+    expect(logged.mock.calls.flat().join(" ")).toContain(join(home, "data/items.yaml"));
+  } finally {
+    logged.mockRestore();
+    chmodSync(join(home, "data/items.yaml"), 0o600);
+  }
+});
+
 test("poll: starts in the background and returns at once; refused while one runs, also another process's", async () => {
   await open("mcp:\n  read_only: false\n");
   let release!: () => void;
