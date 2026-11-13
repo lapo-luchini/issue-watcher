@@ -1,8 +1,8 @@
 // The MCP tools against a temporary watcher home (a git repo), its cache and a fake forge.
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { openContext, type Context } from "../src/core/context.ts";
 import type { Adapter, ItemRef, Snapshot } from "../src/core/model.ts";
 import { itemId, lockHolder } from "../src/core/store.ts";
@@ -33,7 +33,7 @@ const adapter: Adapter = {
 
 /** Opens the watcher home with `mcp:` set as given (nothing: the default). */
 async function open(mcp = "") {
-  home = mkdtempSync(join(tmpdir(), "watcher-mcp-"));
+  home = tmpDir("mcp");
   for (const args of [["init", "-q"], ["config", "user.name", "T"], ["config", "user.email", "t@example.org"]]) {
     Bun.spawnSync(["git", "-C", home, ...args]);
   }
@@ -63,6 +63,7 @@ async function open(mcp = "") {
 afterEach(async () => {
   await tools.idle();
   ctx.store.close();
+  cleanupTmp();
 });
 
 const call = async (name: string, args: Record<string, unknown> = {}) => JSON.parse(await tools.call(name, args));
@@ -88,7 +89,7 @@ test("mcp.read_only: false lists the write tools; true is the same as absent; a 
   await open("mcp:\n  read_only: true\n");
   expect(names()).toHaveLength(4);
   ctx.store.close();
-  home = mkdtempSync(join(tmpdir(), "watcher-mcp-"));
+  home = tmpDir("mcp");
   mkdirSync(join(home, "data"));
   writeFileSync(join(home, "data/config.yaml"), "instances: []\nmcp:\n  read_only: 'false'\n");
   await expect(openContext(home)).rejects.toThrow("'read_only' must be true or false");

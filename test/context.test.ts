@@ -1,15 +1,17 @@
-import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { openContext } from "../src/core/context.ts";
 
 function home(config: string | null): string {
-  const dir = mkdtempSync(join(tmpdir(), "watcher-ctx-"));
+  const dir = tmpDir("ctx");
   mkdirSync(join(dir, "data"));
   if (config !== null) writeFileSync(join(dir, "data/config.yaml"), config);
   return dir;
 }
+
+afterEach(cleanupTmp);
 
 const CONFIG = "instances:\n  - {id: github, type: github, url: https://api.github.com, user: lapo}\ncommit_branch: mine\n";
 

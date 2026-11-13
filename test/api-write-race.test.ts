@@ -1,13 +1,13 @@
 // Two processes (say the web server and `watcher mcp`) changing items.yaml at the same time.
-import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { withItemsLock } from "../src/core/api.ts";
 import { lockHolder } from "../src/core/store.ts";
 
 function newHome(): string {
-  const home = mkdtempSync(join(tmpdir(), "watcher-race-"));
+  const home = tmpDir("race");
   for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "T"], ["config", "user.email", "t@example.org"]]) {
     Bun.spawnSync(["git", "-C", home, ...args]);
   }
@@ -17,6 +17,8 @@ function newHome(): string {
   Bun.spawnSync(["git", "-C", home, "commit", "-qm", "init"]);
   return home;
 }
+
+afterEach(cleanupTmp);
 
 test("changes made by two processes at once are all kept, and each committed", async () => {
   const home = newHome();
