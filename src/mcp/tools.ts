@@ -15,6 +15,7 @@ import { INVALID_PARAMS, RpcError, ToolError, type ToolDef, type ToolSet } from 
 export interface ToolsOptions {
   adapterFor?: (inst: InstanceConfig) => Adapter; // tests replace the real forges
   now?: () => Date;
+  register?: string; // the register tools use when the call names none (WATCHER_REGISTER); default "default"
 }
 
 export interface WatcherTools extends ToolSet {
