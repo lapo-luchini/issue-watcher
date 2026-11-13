@@ -1,7 +1,7 @@
 // Query/command API shared by every front end (CLI, HTTP server; an MCP server later).
 // Front ends never touch the Store or items.yaml directly.
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
@@ -244,6 +244,7 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, waitM
     for (const deadline = Date.now() + waitMs; ; await Bun.sleep(25)) {
       try {
         linkSync(mine, lock); // fails when the lock exists
+        touch(lock); // its age counts from now, not from when we began to wait
         break;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
@@ -272,6 +273,11 @@ function dropLeftovers(lock: string, mine: string): void {
       if (isStale(path)) unlinkSync(path);
     } catch {} // gone meanwhile
   }
+}
+
+function touch(path: string): void {
+  const now = new Date();
+  utimesSync(path, now, now);
 }
 
 function readOrNull(path: string): string | null {

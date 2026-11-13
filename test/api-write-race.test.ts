@@ -1,6 +1,6 @@
 // Two processes (say the web server and `watcher mcp`) changing items.yaml at the same time.
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { withItemsLock } from "../src/core/api.ts";
@@ -155,4 +155,15 @@ test("the file of a process killed before it could link or drop its lock is clea
   writeFileSync(live, `${lockHolder()} 66666666-7777-8888-9999-000000000000`);
   await withItemsLock(home, async () => {});
   expect(leftovers(home)).toEqual([live.split("/").pop()!]);
+});
+
+test("a lock's age starts when it is taken, not when its holder began to wait", async () => {
+  const home = newHome();
+  makeLock(home, lockHolder(), 5);
+  let age = Infinity;
+  const holding = withItemsLock(home, async () => void (age = Date.now() - statSync(lockFile(home)).mtimeMs));
+  await Bun.sleep(600);
+  unlinkSync(lockFile(home)); // the first holder lets go
+  await holding;
+  expect(age).toBeLessThan(300);
 });
