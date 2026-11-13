@@ -1,5 +1,5 @@
 // The MCP tools against a temporary watcher home (a git repo), its cache and a fake forge.
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
@@ -240,6 +240,21 @@ test("update_item: a change that cannot be written is a tool error the assistant
     expect(await tools.call("update_item", { item: PR, muted: false }).catch((e) => e)).toBeInstanceOf(ToolError);
   } finally {
     chmodSync(join(home, "var"), 0o700);
+  }
+});
+
+test("update_item: an error other than the busy lock is not passed on (it carries paths); it goes to stderr", async () => {
+  await open("mcp:\n  read_only: false\n");
+  chmodSync(join(home, "data/items.yaml"), 0o400); // writing the file fails with its path in the message
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const err = await tools.call("update_item", { item: PR, muted: false }).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    expect(err.message).toBe("could not write items.yaml");
+    expect(logged.mock.calls.flat().join(" ")).toContain(join(home, "data/items.yaml"));
+  } finally {
+    logged.mockRestore();
+    chmodSync(join(home, "data/items.yaml"), 0o600);
   }
 });
 

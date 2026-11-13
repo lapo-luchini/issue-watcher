@@ -3,7 +3,7 @@
 // tools are neither listed nor callable then, an unknown tool as far as the client can tell.
 import { createAdapter } from "../adapters/index.ts";
 import {
-  addItem, changeIntent, instanceStatus, itemEvents, listItems, markSeen, parseIntentChange, updates,
+  addItem, changeIntent, instanceStatus, ItemsBusyError, itemEvents, listItems, markSeen, parseIntentChange, updates,
   type EventView, type ItemView,
 } from "../core/api.ts";
 import type { InstanceConfig } from "../core/config.ts";
@@ -245,7 +245,9 @@ export function createTools(ctx: Context, opts: ToolsOptions = {}): WatcherTools
         try {
           r = await changeIntent(where, item.url, change, ctx.canonical, item.instance ? item.repo : undefined);
         } catch (err) {
-          throw new ToolError((err as Error).message);
+          if (err instanceof ItemsBusyError) throw new ToolError(err.message);
+          console.error(`watcher: update_item failed: ${(err as Error).message}`); // fs and git messages carry paths: not for the assistant
+          throw new ToolError("could not write items.yaml");
         }
         return { item: itemOut(await findItem(item.id)), warning: r.warning ?? null };
       },

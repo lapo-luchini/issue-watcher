@@ -234,6 +234,8 @@ export interface LockTiming {
   beatMs: number;
   claimMs: number; // how long a `.break` claim may stand: shorter than waitMs, or one left behind would block every waiter
 }
+/** The items lock stayed with another process: its message is path-free and may be shown to anyone. */
+export class ItemsBusyError extends Error {}
 const LOCK_TIMING: LockTiming = { waitMs: 30_000, staleMs: 60_000, beatMs: 10_000, claimMs: 10_000 };
 
 /**
@@ -263,7 +265,7 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timin
         breakIfStale(lock, mine, staleMs, claimMs);
         if (Date.now() > deadline) {
           console.error(`watcher: ${lock} is held by another process`); // the message goes to the assistant: no path in it
-          throw new Error("items.yaml is being changed by another process; try again");
+          throw new ItemsBusyError("items.yaml is being changed by another process; try again");
         }
       }
     }
