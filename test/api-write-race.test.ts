@@ -202,3 +202,15 @@ test("a holder does not refresh a lock that was taken over", async () => {
     expect(Date.now() - statSync(lockFile(home)).mtimeMs).toBeGreaterThan(9000);
   }, fast);
 });
+
+test("a break claim left by a stuck process does not hold up a takeover past the wait", async () => {
+  const home = newHome();
+  makeLock(home, lockHolder(Bun.spawnSync(["true"]).pid), 5);
+  const claim = `${lockFile(home)}.break`;
+  writeFileSync(claim, `${lockHolder()} claim`); // a live process, but it has not moved for 15 s
+  const old = new Date(Date.now() - 15_000);
+  utimesSync(claim, old, old);
+  const t0 = Date.now();
+  await withItemsLock(home, async () => {});
+  expect(Date.now() - t0).toBeLessThan(2000);
+}, 40_000);

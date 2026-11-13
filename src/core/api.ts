@@ -235,16 +235,17 @@ export interface IntentRepo {
  * exited, is a crashed process's and is taken over, by one waiting process at a time. The lock is
  * released only while it still holds our token.
  */
-/** How long a writer waits for the lock, how long a lock may go unrefreshed, how often its holder refreshes it (ms). Tests shorten them. */
+/** Times in ms; tests shorten them. */
 export interface LockTiming {
   waitMs: number;
   staleMs: number;
   beatMs: number;
+  claimMs: number; // how long a `.break` claim may stand: shorter than waitMs, or one left behind would block every waiter
 }
-const LOCK_TIMING: LockTiming = { waitMs: 30_000, staleMs: 60_000, beatMs: 10_000 };
+const LOCK_TIMING: LockTiming = { waitMs: 30_000, staleMs: 60_000, beatMs: 10_000, claimMs: 10_000 };
 
 export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timing: Partial<LockTiming> = {}): Promise<T> {
-  const { waitMs, staleMs, beatMs } = { ...LOCK_TIMING, ...timing };
+  const { waitMs, staleMs, beatMs, claimMs } = { ...LOCK_TIMING, ...timing };
   const lock = join(home, "var/items.lock");
   mkdirSync(dirname(lock), { recursive: true });
   const token = `${lockHolder()} ${randomUUID()}`;
@@ -258,7 +259,7 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timin
         break;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-        breakIfStale(lock, mine, staleMs);
+        breakIfStale(lock, mine, staleMs, claimMs);
         if (Date.now() > deadline) throw new Error(`items.yaml is locked by another process (${lock})`);
       }
     }
@@ -324,15 +325,16 @@ function isStale(path: string, staleMs: number): boolean {
 /**
  * Removes `lock` when it is stale. Whoever links `<lock>.break` is the one to look at the lock and
  * remove it, so two waiting processes can never both remove it, the second one taking the first
- * one's new lock. A `.break` is as stale as a lock: older than a minute, or its process has exited.
+ * one's new lock. A `.break` stands for a moment only: it is stale after `claimMs`, or when its process has exited.
  */
-function breakIfStale(lock: string, mine: string, staleMs: number): void {
+export function breakIfStale(lock: string, mine: string, staleMs: number, claimMs: number): void {
   const claim = `${lock}.break`;
+  touch(mine); // the claim is the same file: its age counts from now, not from when the wait began
   try {
     linkSync(mine, claim);
   } catch {
     try {
-      if (isStale(claim, staleMs)) unlinkSync(claim);
+      if (isStale(claim, claimMs)) unlinkSync(claim);
     } catch {} // released meanwhile
     return;
   }
