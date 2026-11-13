@@ -497,6 +497,15 @@ test("a read error names the register's file, never a path", async () => {
   }
 });
 
+test("a register file that is not valid YAML is told as it is (the parser's message has no path)", async () => {
+  await open();
+  addRegister("houston", "items: [unclosed\n");
+  const err = await tools.call("list_items", { register: "houston" }).catch((e) => e);
+  expect(err).toBeInstanceOf(ToolError);
+  expect(err.message).not.toContain("could not read");
+  expect(err.message).not.toContain(home);
+});
+
 test("poll fetches the entries of every register, once", async () => {
   await open("mcp:\n  read_only: false\n");
   const knowsOther: Adapter = { ...adapter, discover: async () => [], refFromUrl: (url) => (url === OTHER ? { url, instance: "github", kind: "issue" } : null) };
