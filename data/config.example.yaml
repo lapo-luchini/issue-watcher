@@ -70,6 +70,11 @@ instances:
 
 # Optional filter tuning (these are the defaults).
 filter:
-  noise_patterns: ['^\+1$', '^me too', '^same here', '^any update', '^bump$']
+  noise_patterns:
+    - '^\+1$'
+    - '^me too'
+    - '^same here'
+    - '^any update'
+    - '^bump$'
   min_comment_length: 20
   bot_allowlist: []

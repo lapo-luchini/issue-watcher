@@ -2,9 +2,13 @@
   <!-- Watcher: a lighthouse, dark (nothing unread). favicon-lit.svg shines when something is. -->
   <style>
     .tower { fill: #2f4bd8; }
-    .lamp { fill: #93a1b0; }
+    .lamp, .beam { fill: #93a1b0; }
+    /* Faint beams where the lit icon has yellow ones: without them, roof and tower read as an up arrow. */
+    .beam { opacity: .45; }
     @media (prefers-color-scheme: dark) { .tower { fill: #8ea2ff; } }
   </style>
+  <path class="beam" d="M11 10.5 0 4.5v12Z"/>
+  <path class="beam" d="M21 10.5 32 4.5v12Z"/>
   <path class="tower" d="M16 1 24 8H8Z"/>
   <rect class="lamp" x="11" y="8" width="10" height="5"/>
   <!-- The band is cut out, so it shows the tab's own colour in light and dark themes. -->
