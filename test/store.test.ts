@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FILTER } from "../src/core/config.ts";
@@ -181,4 +181,38 @@ test("rollback discards writes", () => {
   store.upsertItem(item);
   store.rollback();
   expect(store.getItem(url)).toBeNull();
+});
+
+test("transaction commits on return and rolls back on a throw", () => {
+  store.transaction(() => store.upsertItem(item));
+  expect(store.getItem(url)).not.toBeNull();
+  expect(() => store.transaction(() => { store.markSeen(url, "2026-11-03T00:00:00.000Z"); throw new Error("boom"); })).toThrow("boom");
+  expect(store.getItem(url)?.seenAt).toBeNull();
+  expect(store.transaction(() => 42)).toBe(42);
+});
+
+test("transaction takes the write lock up front, so a read then write cannot fail on a concurrent commit", () => {
+  const dir = mkdtempSync(join(tmpdir(), "watcher-tx-"));
+  const a = new Store(join(dir, "cache.sqlite"));
+  const b = new Store(join(dir, "cache.sqlite"));
+  b.db.exec("PRAGMA busy_timeout = 0;");
+  try {
+    a.upsertItem(item);
+    let otherBlocked = false;
+    a.transaction(() => {
+      a.getItem(url); // a read first: a deferred transaction would now fail on the write below once b commits
+      try {
+        b.markSeen(url, "2026-11-03T00:00:00.000Z");
+      } catch {
+        otherBlocked = true;
+      }
+      a.markSeen(url, "2026-11-04T00:00:00.000Z");
+    });
+    expect(otherBlocked).toBe(true);
+    expect(a.getItem(url)?.seenAt).toBe("2026-11-04T00:00:00.000Z");
+  } finally {
+    a.close();
+    b.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
