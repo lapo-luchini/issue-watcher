@@ -1,7 +1,7 @@
 // Query/command API shared by every front end (CLI, HTTP server; an MCP server later).
 // Front ends never touch the Store or items.yaml directly.
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
@@ -288,7 +288,7 @@ function isStale(path: string): boolean {
 /**
  * Removes `lock` when it is stale. Whoever links `<lock>.break` is the one to look at the lock and
  * remove it, so two waiting processes can never both remove it, the second one taking the first
- * one's new lock. A `.break` older than a minute is a crashed process's.
+ * one's new lock. A `.break` is as stale as a lock: older than a minute, or its process has exited.
  */
 function breakIfStale(lock: string, mine: string): void {
   const claim = `${lock}.break`;
@@ -296,7 +296,7 @@ function breakIfStale(lock: string, mine: string): void {
     linkSync(mine, claim);
   } catch {
     try {
-      if (Date.now() - statSync(claim).mtimeMs > 60_000) unlinkSync(claim);
+      if (isStale(claim)) unlinkSync(claim);
     } catch {} // released meanwhile
     return;
   }

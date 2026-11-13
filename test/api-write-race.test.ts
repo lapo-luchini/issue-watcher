@@ -76,3 +76,13 @@ test("a recent lock of a live process is waited for", async () => {
   await waiting;
   expect(got).toBe(true);
 });
+
+test("a break claim left by a process that has exited does not hold the others up", async () => {
+  const home = newHome();
+  const gone = Bun.spawnSync(["true"]);
+  makeLock(home, lockHolder(gone.pid), 5);
+  writeFileSync(`${lockFile(home)}.break`, `${lockHolder(gone.pid)} claim`); // killed between taking the claim and dropping it
+  const t0 = Date.now();
+  await withItemsLock(home, async () => {});
+  expect(Date.now() - t0).toBeLessThan(2000);
+}, 40_000);
