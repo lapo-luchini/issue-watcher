@@ -6,7 +6,7 @@ import { basename, dirname, join } from "node:path";
 import type { Config } from "./config.ts";
 import { addEntry, commitFile, committedContent, editIntent, effectivePriority, type CommitResult, type Intent, type IntentChange } from "./intent.ts";
 import type { ActorRole, CiState, EventKind, ItemKind, ItemRef, ItemState, Priority } from "./model.ts";
-import { DEFAULT_REGISTER, ITEMS_FILE, registerFile } from "./registers.ts";
+import { DEFAULT_REGISTER, ITEMS_FILE, registerFile, registerLabel } from "./registers.ts";
 import { holderIsGone, itemId, lockHolder, type EventRow, type Store } from "./store.ts";
 import { summarize } from "./summary.ts";
 
@@ -181,13 +181,16 @@ export function itemLabel(url: string, repo?: string): string {
   return `${repo ?? m[1]}#${id}`;
 }
 
-function changeMessage(label: string, c: IntentChange): string {
+function changeMessage(label: string, c: IntentChange, register: string): string {
   const parts: string[] = [];
   if (c.priority !== undefined) parts.push(c.priority === null ? `reset priority of ${label}` : `mark ${label} ${c.priority}`);
   if (c.muted !== undefined) parts.push(`${c.muted ? "mute" : "unmute"} ${label}`);
   if (c.note !== undefined) parts.push(c.note ? `note on ${label}` : `remove note on ${label}`);
-  return `watcher: ${parts.join("; ")}`;
+  return `watcher: ${parts.join("; ")}${inRegister(register)}`;
 }
+
+/** The commit message's ending for a register other than default. */
+const inRegister = (register: string) => (register === DEFAULT_REGISTER ? "" : ` (register ${register})`);
 
 // Writes to items.yaml happen one at a time (the server may get two requests at once).
 let writes: Promise<unknown> = Promise.resolve();
@@ -359,51 +362,67 @@ export function breakIfStale(lock: string, mine: string, staleMs: number, claimM
   } catch {} // already gone
 }
 
-async function rewriteItems(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
-  return withItemsLock(where.home, () => rewriteLocked(where, edit, message));
+async function rewriteItems(where: IntentRepo, register: string, edit: (text: string) => string, message: string): Promise<CommitResult> {
+  const file = registerFile(register);
+  return withItemsLock(where.home, () => rewriteLocked(where, file, edit, message));
 }
 
-async function rewriteLocked(where: IntentRepo, edit: (text: string) => string, message: string): Promise<CommitResult> {
-  const path = join(where.home, ITEMS_FILE);
-  const file = Bun.file(path);
-  const before = (await file.exists()) ? await file.text() : "";
+async function rewriteLocked(where: IntentRepo, file: string, edit: (text: string) => string, message: string): Promise<CommitResult> {
+  const path = join(where.home, file);
+  const current = Bun.file(path);
+  const before = (await current.exists()) ? await current.text() : "";
   const after = edit(before);
   if (after === before) return { ok: true };
   // Hand edits not committed yet go into this commit too: say so rather than hide them.
   // A branch that does not exist yet will start from the current commit.
-  const committed = (await committedContent(where.home, where.branch, ITEMS_FILE)) ?? (await committedContent(where.home, "HEAD", ITEMS_FILE));
+  const committed = (await committedContent(where.home, where.branch, file)) ?? (await committedContent(where.home, "HEAD", file));
   const dirty = before !== "" && committed !== null && committed !== before;
   await Bun.write(path, after);
-  const note = `\n\nAlso commits earlier changes to ${ITEMS_FILE} that were not committed yet.`;
-  return commitFile(where.home, ITEMS_FILE, dirty ? message + note : message, where.branch);
+  const note = `\n\nAlso commits earlier changes to ${file} that were not committed yet.`;
+  return commitFile(where.home, file, dirty ? message + note : message, where.branch);
 }
 
 /**
- * Changes one item's priority, mute or note in `<home>/data/items.yaml` and commits it.
+ * Changes one item's priority, mute or note in a register's file (`<home>/data/items.yaml` for
+ * `default`, the one the tool had before registers) and commits it.
  * `canonical` maps a URL written in the file to the canonical one (see urlRecognizer);
  * `repoName` makes the commit message read better.
  */
 export function changeIntent(
   where: IntentRepo, url: string, change: IntentChange, canonical: (url: string) => string, repoName?: string,
+  register = DEFAULT_REGISTER,
 ): Promise<CommitResult> {
-  return serialized(() => rewriteItems(where, (t) => editIntent(t, url, change, canonical), changeMessage(itemLabel(url, repoName), change)));
+  try {
+    registerFile(register); // a bad name fails before anything is queued
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  return serialized(() => rewriteItems(where, register, (t) => editIntent(t, url, change, canonical), changeMessage(itemLabel(url, repoName), change, register)));
 }
 
 /**
  * Adds an item by URL: one a configured instance recognizes is tracked (fetched on the next
- * poll), any other URL becomes a manual item with `title`. Refuses items already tracked.
+ * poll), any other URL becomes a manual item with `title`. Refuses items already tracked: for
+ * `default` those the cache has too (it lists what discovery found), for another register only
+ * its own entries, so an item the cache has from elsewhere can be added to it.
  */
 export function addItem(
   where: IntentRepo, store: Store, intent: Intent, recognize: (url: string) => ItemRef | null, url: string, title?: string,
+  register = DEFAULT_REGISTER,
 ): Promise<{ url: string; manual: boolean; commit: CommitResult }> {
+  try {
+    registerFile(register);
+  } catch (err) {
+    return Promise.reject(err);
+  }
   if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) return Promise.reject(new ItemRefusedError(`not a web URL: ${url}`));
   const ref = recognize(url);
   const canonical = ref?.url ?? url;
-  if (intent.has(canonical) || store.getItem(canonical)) return Promise.reject(new ItemRefusedError(`already tracked: ${canonical}`));
+  if (intent.has(canonical) || (register === DEFAULT_REGISTER && store.getItem(canonical))) return Promise.reject(new ItemRefusedError(`already tracked: ${canonical}`));
   const manual = !ref;
-  const message = `watcher: add ${manual ? "manual item " : ""}${itemLabel(canonical)}`;
+  const message = `watcher: add ${manual ? "manual item " : ""}${itemLabel(canonical)}${inRegister(register)}`;
   return serialized(async () => ({
     url: canonical, manual,
-    commit: await rewriteItems(where, (t) => addEntry(t, canonical, { manual, title: title?.trim() || undefined }), message),
+    commit: await rewriteItems(where, register, (t) => addEntry(t, canonical, { manual, title: title?.trim() || undefined }, registerLabel(register)), message),
   }));
 }

@@ -26,6 +26,11 @@ export function registerFile(name: string): string {
   return name === DEFAULT_REGISTER ? ITEMS_FILE : `${REGISTERS_DIR}/${name}.yaml`;
 }
 
+/** How error messages name a register's file: `items.yaml` for default, `registers/<name>.yaml`. */
+export function registerLabel(name: string): string {
+  return name === DEFAULT_REGISTER ? "items.yaml" : `registers/${checkRegisterName(name)}.yaml`;
+}
+
 /**
  * Every register, `default` first (it exists even without its file), then the files of
  * data/registers/ by name. A file whose name is not a valid register name, or that is called
