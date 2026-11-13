@@ -1,7 +1,7 @@
 // Forgejo (e.g. codeberg.org) and Gitea, which share this API. `inst.url` is the API base,
 // e.g. https://codeberg.org/api/v1; the web UI lives at the same URL without /api/v1.
 import type { InstanceConfig } from "../core/config.ts";
-import { defaultHttp, getAllPages, getJson, HttpError, RateLimitError, type HttpDeps } from "../core/http.ts";
+import { defaultHttp, getAllPages, getJson, HttpError, RateLimitError, type HttpDeps, type PageOptions } from "../core/http.ts";
 import type { ActorRole, Adapter, CiState, ItemRef, ItemState, NormalizedEvent, Snapshot } from "../core/model.ts";
 import { forgeDate, mentions, notGone, optional, parseUrl } from "./util.ts";
 
@@ -56,6 +56,9 @@ const FIRST_RUN_DAYS = 90;
 // Forgejo's default WORK_IN_PROGRESS_PREFIXES; only used when the API has no `draft` field.
 const WIP_TITLE = /^\s*(wip:|\[wip\])/i;
 
+/** Item endpoints are oldest first: fail rather than hide the newest entries past the page cap. */
+const STRICT: PageOptions = { strict: true };
+
 export class ForgejoAdapter implements Adapter {
   private readonly web: string;
   private readonly webPrefix: string; // path of the web UI, "" or e.g. "/git"
@@ -83,8 +86,8 @@ export class ForgejoAdapter implements Adapter {
     return (await getJson<T>(this.inst.url + path, this.headers(), this.http)).data;
   }
 
-  private all<T>(path: string): Promise<T[]> {
-    return getAllPages<T>(this.inst.url + path, this.headers(), this.http);
+  private all<T>(path: string, opts?: PageOptions): Promise<T[]> {
+    return getAllPages<T>(this.inst.url + path, this.headers(), this.http, undefined, opts);
   }
 
   /** Also accepts URLs copied from the browser: a PR tab (/files, /commits), a query, a #fragment. */
@@ -183,7 +186,7 @@ export class ForgejoAdapter implements Adapter {
     const issue = await this.get<FjIssue>(`${base}/issues/${num}`);
     // No limit/page: Forgejo then returns the whole timeline at once and sends no Link header
     // (with `page` it truncates, still without a Link header). getAllPages is ready if that changes.
-    const timeline = await notGone(this.all<FjTimelineEvent>(`${base}/issues/${num}/timeline`));
+    const timeline = await notGone(this.all<FjTimelineEvent>(`${base}/issues/${num}/timeline`, STRICT));
     let state: ItemState = issue.state === "open" ? "open" : "closed";
     let ciState: CiState | null = null;
     let hasConflicts: boolean | null = false;
@@ -192,7 +195,7 @@ export class ForgejoAdapter implements Adapter {
       const pr = await notGone(this.get<FjPull>(`${base}/pulls/${num}`));
       if (pr.merged) state = "merged";
       hasConflicts = this.conflicts(state, pr, issue.title);
-      reviews = await notGone(this.all<FjReview>(`${base}/pulls/${num}/reviews`));
+      reviews = await notGone(this.all<FjReview>(`${base}/pulls/${num}/reviews`, STRICT));
       ciState = await notGone(this.ciState(base, pr.head.sha));
     }
     const maintainers = await this.maintainers(owner, repo, reviews);

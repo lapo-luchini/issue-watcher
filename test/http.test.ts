@@ -81,3 +81,33 @@ test("getAllPages follows Link headers and applies pick", async () => {
   expect(await getAllPages<number>("http://x/", {}, deps, (b) => b.items)).toEqual([1, 2, 3]);
   expect(calls).toEqual(["http://x/", "http://x/?page=2"]);
 });
+
+test("getAllPages strict mode fails instead of silently dropping pages past maxPages", async () => {
+  const more = () => json({ items: [1] }, { headers: { link: '<http://x/?page=n>; rel="next"' } });
+  const { deps } = fakeHttp([more(), more(), more()]);
+  await expect(getAllPages<number>("http://x/", {}, deps, (b) => b.items, { maxPages: 2, strict: true })).rejects.toThrow(/more than 2 pages/);
+});
+
+test("getAllPages accepts exactly maxPages pages", async () => {
+  const { deps } = fakeHttp([json({ items: [1] }, { headers: { link: '<http://x/?page=2>; rel="next"' } }), json({ items: [2] })]);
+  expect(await getAllPages<number>("http://x/", {}, deps, (b) => b.items, { maxPages: 2, strict: true })).toEqual([1, 2]);
+});
+
+test("getAllPages truncates by default, so newest-first endpoints stay usable past maxPages", async () => {
+  const more = () => json({ items: [1] }, { headers: { link: '<http://x/?page=n>; rel="next"' } });
+  const { deps } = fakeHttp([more(), more(), more()]);
+  expect(await getAllPages<number>("http://x/", {}, deps, (b) => b.items, { maxPages: 2 })).toEqual([1, 1]);
+});
+
+test("getAllPages tail mode reads the last maxPages pages of an oldest-first list", async () => {
+  const link = '<http://x/?page=2>; rel="next", <http://x/?per_page=1&page=5>; rel="last"';
+  const { deps, calls } = fakeHttp([json({ items: [1] }, { headers: { link } }), json({ items: [4] }), json({ items: [5] })]);
+  expect(await getAllPages<number>("http://x/?per_page=1", {}, deps, (b) => b.items, { maxPages: 2, tail: true })).toEqual([4, 5]);
+  expect(calls).toEqual(["http://x/?per_page=1", "http://x/?per_page=1&page=4", "http://x/?per_page=1&page=5"]);
+});
+
+test("getAllPages tail mode reads everything when the list fits", async () => {
+  const link = '<http://x/?page=2>; rel="next", <http://x/?page=2>; rel="last"';
+  const { deps } = fakeHttp([json({ items: [1] }, { headers: { link } }), json({ items: [2] })]);
+  expect(await getAllPages<number>("http://x/", {}, deps, (b) => b.items, { maxPages: 2, tail: true })).toEqual([1, 2]);
+});
