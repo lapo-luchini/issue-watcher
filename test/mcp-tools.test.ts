@@ -202,6 +202,10 @@ test("mark_seen: items by URL or id, or all; exactly one of them; an unknown ite
   for (const args of [{}, { all: true, items: [PR] }, { all: false }, { items: [] }, { items: [3] }, { items: PR }]) {
     expect((await tools.call("mark_seen", args).catch((e) => e))).toBeInstanceOf(ToolError);
   }
+  const mixed = await tools.call("mark_seen", { items: [PR, 5] }).catch((e) => e); // one that is not text spoils the list
+  expect(mixed).toBeInstanceOf(ToolError);
+  expect(mixed.message).toBe("'items' must be a non-empty list of items");
+  expect(await unread()).toBe(1);
   const err = await tools.call("mark_seen", { items: [PR, "nope"] }).catch((e) => e);
   expect(err.message).toBe("no such item: nope");
   expect(await unread()).toBe(1);
