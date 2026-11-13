@@ -230,11 +230,21 @@ export interface IntentRepo {
 /**
  * Runs `fn` holding `<home>/var/items.lock`, so that two processes (the web server, `watcher mcp`)
  * never edit items.yaml at once: each would read the file before the other's change and lose it.
- * The file holds its owner's token and is created complete (linked into place). A lock older than
- * a minute, or left by a process that has exited, is a crashed process's and is taken over, by one
- * waiting process at a time. The lock is released only while it still holds our token.
+ * The file holds its owner's token and is created complete (linked into place). While `fn` runs its
+ * owner refreshes the file's mtime; a lock not refreshed for a minute, or left by a process that has
+ * exited, is a crashed process's and is taken over, by one waiting process at a time. The lock is
+ * released only while it still holds our token.
  */
-export async function withItemsLock<T>(home: string, fn: () => Promise<T>, waitMs = 30_000): Promise<T> {
+/** How long a writer waits for the lock, how long a lock may go unrefreshed, how often its holder refreshes it (ms). Tests shorten them. */
+export interface LockTiming {
+  waitMs: number;
+  staleMs: number;
+  beatMs: number;
+}
+const LOCK_TIMING: LockTiming = { waitMs: 30_000, staleMs: 60_000, beatMs: 10_000 };
+
+export async function withItemsLock<T>(home: string, fn: () => Promise<T>, timing: Partial<LockTiming> = {}): Promise<T> {
+  const { waitMs, staleMs, beatMs } = { ...LOCK_TIMING, ...timing };
   const lock = join(home, "var/items.lock");
   mkdirSync(dirname(lock), { recursive: true });
   const token = `${lockHolder()} ${randomUUID()}`;
@@ -248,29 +258,36 @@ export async function withItemsLock<T>(home: string, fn: () => Promise<T>, waitM
         break;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-        breakIfStale(lock, mine);
+        breakIfStale(lock, mine, staleMs);
         if (Date.now() > deadline) throw new Error(`items.yaml is locked by another process (${lock})`);
       }
     }
   } finally {
     drop(mine);
   }
+  const beat = setInterval(() => {
+    if (readOrNull(lock) !== token) return; // taken over: not ours to refresh
+    try {
+      touch(lock);
+    } catch {} // released meanwhile
+  }, beatMs);
   try {
-    dropLeftovers(lock, mine);
+    dropLeftovers(lock, mine, staleMs);
     return await fn();
   } finally {
+    clearInterval(beat);
     if (readOrNull(lock) === token) drop(lock); // else taken over as stale
   }
 }
 
 /** A process killed before it dropped its `<lock>.<token>` file leaves it behind: those of exited processes go. */
-function dropLeftovers(lock: string, mine: string): void {
+function dropLeftovers(lock: string, mine: string, staleMs: number): void {
   const start = `${basename(lock)}.`;
   for (const name of readdirSync(dirname(lock))) {
     const path = join(dirname(lock), name);
     if (!name.startsWith(start) || !/^[0-9a-f-]{36}$/.test(name.slice(start.length)) || path === mine) continue;
     try {
-      if (isStale(path)) unlinkSync(path);
+      if (isStale(path, staleMs)) unlinkSync(path);
     } catch {} // gone meanwhile
   }
 }
@@ -294,11 +311,11 @@ function drop(path: string): void {
   } catch {} // already gone
 }
 
-/** Older than a minute, or held by a process of this host that has exited (its token starts with its pid). */
-function isStale(path: string): boolean {
+/** Not refreshed for `staleMs`, or held by a process of this host that has exited (its token starts with its pid). */
+function isStale(path: string, staleMs: number): boolean {
   const fd = openSync(path, "r"); // one file for both the age and the token
   try {
-    return Date.now() - fstatSync(fd).mtimeMs > 60_000 || holderIsGone(readFileSync(fd, "utf8").split(" ")[0]!);
+    return Date.now() - fstatSync(fd).mtimeMs > staleMs || holderIsGone(readFileSync(fd, "utf8").split(" ")[0]!);
   } finally {
     closeSync(fd);
   }
@@ -309,18 +326,18 @@ function isStale(path: string): boolean {
  * remove it, so two waiting processes can never both remove it, the second one taking the first
  * one's new lock. A `.break` is as stale as a lock: older than a minute, or its process has exited.
  */
-function breakIfStale(lock: string, mine: string): void {
+function breakIfStale(lock: string, mine: string, staleMs: number): void {
   const claim = `${lock}.break`;
   try {
     linkSync(mine, claim);
   } catch {
     try {
-      if (isStale(claim)) unlinkSync(claim);
+      if (isStale(claim, staleMs)) unlinkSync(claim);
     } catch {} // released meanwhile
     return;
   }
   try {
-    if (isStale(lock)) unlinkSync(lock);
+    if (isStale(lock, staleMs)) unlinkSync(lock);
   } catch {} // released meanwhile
   drop(claim);
 }

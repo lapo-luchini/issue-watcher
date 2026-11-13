@@ -95,7 +95,7 @@ test("waiting for a lock that is never let go ends in an error after the time gi
   const home = newHome();
   makeLock(home, lockHolder(), 5);
   const t0 = Date.now();
-  await expect(withItemsLock(home, async () => {}, 300)).rejects.toThrow("items.yaml is locked by another process");
+  await expect(withItemsLock(home, async () => {}, { waitMs: 300 })).rejects.toThrow("items.yaml is locked by another process");
   expect(Date.now() - t0).toBeGreaterThanOrEqual(300);
   expect(readFileSync(lockFile(home), "utf8")).toBe(lockHolder()); // still the other's
   expect(leftovers(home)).toEqual([]);
@@ -166,4 +166,39 @@ test("a lock's age starts when it is taken, not when its holder began to wait", 
   unlinkSync(lockFile(home)); // the first holder lets go
   await holding;
   expect(age).toBeLessThan(300);
+});
+
+const fast = { staleMs: 300, beatMs: 50 }; // a lock counts as abandoned after 300 ms without a refresh
+
+test("a live holder whose work outlasts the staleness limit is not overtaken", async () => {
+  const home = newHome();
+  const order: string[] = [];
+  const first = withItemsLock(home, async () => {
+    order.push("a in");
+    await Bun.sleep(1000); // three times the limit
+    order.push("a out");
+  }, fast);
+  await Bun.sleep(100);
+  const second = withItemsLock(home, async () => void order.push("b in"), { ...fast, waitMs: 5000 });
+  await Promise.all([first, second]);
+  expect(order).toEqual(["a in", "a out", "b in"]);
+});
+
+test("a lock nobody refreshes is taken over after the staleness limit, though its holder lives", async () => {
+  const home = newHome();
+  makeLock(home, lockHolder(), 0);
+  const t0 = Date.now();
+  await withItemsLock(home, async () => {}, { ...fast, waitMs: 5000 });
+  expect(Date.now() - t0).toBeGreaterThanOrEqual(250);
+});
+
+test("a holder does not refresh a lock that was taken over", async () => {
+  const home = newHome();
+  await withItemsLock(home, async () => {
+    writeFileSync(lockFile(home), "someone else");
+    const old = new Date(Date.now() - 10_000);
+    utimesSync(lockFile(home), old, old);
+    await Bun.sleep(200); // four beats
+    expect(Date.now() - statSync(lockFile(home)).mtimeMs).toBeGreaterThan(9000);
+  }, fast);
 });
