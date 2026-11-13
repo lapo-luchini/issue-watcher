@@ -3,7 +3,7 @@
 import index from "../web/index.html";
 import { createAdapter } from "./adapters/index.ts";
 import {
-  addItem, changeIntent, getItem, instanceStatus, itemEvents, listItems, markSeen, type ListOptions,
+  addItem, changeIntent, getItem, instanceStatus, itemEvents, listItems, markSeen, parseIntentChange, type ListOptions,
 } from "./core/api.ts";
 import type { InstanceConfig } from "./core/config.ts";
 import { openContext } from "./core/context.ts";
@@ -103,26 +103,11 @@ export async function startServer(opts: ServerOptions) {
   }
 
   function parseChange(b: Record<string, unknown>): IntentChange {
-    const change: IntentChange = {};
-    for (const key of Object.keys(b)) {
-      if (!["priority", "muted", "note"].includes(key)) throw new HttpError(400, `unknown field '${key}'`);
+    try {
+      return parseIntentChange(b);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
     }
-    if ("priority" in b) {
-      if (b.priority !== null && b.priority !== "important" && b.priority !== "normal") {
-        throw new HttpError(400, "priority must be 'important', 'normal' or null");
-      }
-      change.priority = b.priority as Priority | null;
-    }
-    if ("muted" in b) {
-      if (typeof b.muted !== "boolean") throw new HttpError(400, "muted must be true or false");
-      change.muted = b.muted;
-    }
-    if ("note" in b) {
-      if (b.note !== null && typeof b.note !== "string") throw new HttpError(400, "note must be text or null");
-      change.note = b.note as string | null;
-    }
-    if (Object.keys(change).length === 0) throw new HttpError(400, "nothing to change");
-    return change;
   }
 
   function startPoll(): void {

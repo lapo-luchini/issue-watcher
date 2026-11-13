@@ -195,6 +195,30 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** The change a front end asks for ({priority, muted, note}), checked; throws an Error saying what is wrong. */
+export function parseIntentChange(b: Record<string, unknown>): IntentChange {
+  const change: IntentChange = {};
+  for (const key of Object.keys(b)) {
+    if (!["priority", "muted", "note"].includes(key)) throw new Error(`unknown field '${key}'`);
+  }
+  if ("priority" in b) {
+    if (b.priority !== null && b.priority !== "important" && b.priority !== "normal") {
+      throw new Error("priority must be 'important', 'normal' or null");
+    }
+    change.priority = b.priority as Priority | null;
+  }
+  if ("muted" in b) {
+    if (typeof b.muted !== "boolean") throw new Error("muted must be true or false");
+    change.muted = b.muted;
+  }
+  if ("note" in b) {
+    if (b.note !== null && typeof b.note !== "string") throw new Error("note must be text or null");
+    change.note = b.note as string | null;
+  }
+  if (Object.keys(change).length === 0) throw new Error("nothing to change");
+  return change;
+}
+
 /** Where intent changes go: the watcher's home (a git working copy) and the branch to commit to. */
 export interface IntentRepo {
   home: string;

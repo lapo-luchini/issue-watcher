@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
-import { getItem, instanceStatus, itemEvents, itemLabel, listItems, markSeen, updates } from "../src/core/api.ts";
+import { getItem, instanceStatus, itemEvents, itemLabel, listItems, markSeen, parseIntentChange, updates } from "../src/core/api.ts";
 import { DEFAULT_FILTER, type Config } from "../src/core/config.ts";
 import { parseIntent } from "../src/core/intent.ts";
 import { itemId, Store, type ItemRow } from "../src/core/store.ts";
@@ -162,4 +162,14 @@ test("updates: news detected after a time, grouped by item, latest detection fir
   expect(r.map((g) => [g.item.url, g.events.map((e) => e.key)])).toEqual([[A, ["c:2", "c:1"]], [B, ["c:1"]]]);
   expect(r[0]!.events[0]).toMatchObject({ summary: "comment by @bob: text c:2", detectedAt: "2026-11-05T00:00:00.000Z" });
   expect(updates(store, intent, new Date("2026-11-05T00:00:00.000Z"))).toEqual([]);
+});
+
+test("parseIntentChange: priority, muted and note, checked; says what is wrong", () => {
+  expect(parseIntentChange({ priority: "important", muted: false, note: null })).toEqual({ priority: "important", muted: false, note: null });
+  expect(parseIntentChange({ priority: null })).toEqual({ priority: null });
+  expect(() => parseIntentChange({ priority: "urgent" })).toThrow("priority must be 'important', 'normal' or null");
+  expect(() => parseIntentChange({ muted: "yes" })).toThrow("muted must be true or false");
+  expect(() => parseIntentChange({ note: 3 })).toThrow("note must be text or null");
+  expect(() => parseIntentChange({ title: "x" })).toThrow("unknown field 'title'");
+  expect(() => parseIntentChange({})).toThrow("nothing to change");
 });
