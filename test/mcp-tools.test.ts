@@ -68,8 +68,8 @@ afterEach(async () => {
 
 const call = async (name: string, args: Record<string, unknown> = {}) => JSON.parse(await tools.call(name, args));
 const names = () => tools.list().map((t) => t.name);
-const WRITE = ["ack", "track", "subscribe", "unsubscribe", "update_item", "add_item", "poll"];
-const READ = ["list_items", "get_item", "list_registers", "list_subscriptions", "updates", "status"];
+const WRITE = ["track", "subscribe", "unsubscribe", "update_item", "add_item", "poll"];
+const READ = ["list_items", "get_item", "list_registers", "list_subscriptions", "updates", "status", "ack"];
 
 test("read-only by default: the write tools are not listed and are unknown when called", async () => {
   await open();

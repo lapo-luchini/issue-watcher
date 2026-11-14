@@ -174,16 +174,27 @@ test("mcp: initialize, tools/list and tools/call over stdio; stdout is protocol 
     { jsonrpc: "2.0", method: "notifications/initialized" },
     { jsonrpc: "2.0", id: 2, method: "tools/list" },
     { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "list_items", arguments: { unread: true } } },
-    { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "ack", arguments: { token: "p.0" } } },
+    { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "track", arguments: { url: PR } } },
   ]);
   expect(r.code).toBe(0);
   expect(r.replies.map((x) => x.id)).toEqual([1, 2, 3, 4]);
   expect(r.replies[0].result).toMatchObject({ protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "watcher", version: "0.1.0" } });
-  expect(r.replies[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["list_items", "get_item", "list_registers", "list_subscriptions", "updates", "status"]);
+  expect(r.replies[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["list_items", "get_item", "list_registers", "list_subscriptions", "updates", "status", "ack"]);
   const items = JSON.parse(r.replies[2].result.content[0].text).items;
   expect(items).toMatchObject([{ url: PR, title: "Fix build", unread: true }]);
   expect(r.replies[3].error.code).toBe(-32602);
   expect(seenAt()).toBeNull();
+});
+
+test("mcp: the tools/list the real server sends is under 1,000 tokens (chars / 4), write tools included", () => {
+  const tokens = () => {
+    const r = mcp([{ jsonrpc: "2.0", id: 1, method: "tools/list" }]).replies[0];
+    return JSON.stringify(r).length / 4; // the whole reply, envelope included
+  };
+  expect(tokens()).toBeLessThan(1000);
+  writeFileSync(join(home, "data/config.yaml"), "instances:\n  - {id: github, type: github, url: https://api.github.com, user: lapo}\nmcp:\n  read_only: false\n");
+  expect(tokens()).toBeLessThan(1000);
+  expect(tokens()).toBeGreaterThan(800); // the write tools are really in it
 });
 
 test("mcp: WATCHER_SUBSCRIPTION is the subscription of calls that name none, checked only when a call needs it", () => {

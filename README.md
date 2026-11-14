@@ -135,7 +135,7 @@ periodically as usual; new data and hand edits to `items.yaml` are seen at once,
 | `list_subscriptions` | the subscriptions, and the one used when a call names none                  |
 | `updates`     | the news after a subscription's cursor, by item, with a token; moves nothing       |
 | `status`      | the last poll per instance, whether a poll is running, data files the poll skips   |
-| `ack`         | move a subscription's cursor to a token `updates` gave                             |
+| `ack`         | move a subscription's cursor to a token `updates` gave (cache only: also read-only) |
 | `track`       | add an item to the subscription's register if absent, and follow it                |
 | `subscribe`   | create a subscription or change its register and scope                             |
 | `unsubscribe` | stop following an item                                                             |
@@ -144,7 +144,7 @@ periodically as usual; new data and hand edits to `items.yaml` are seen at once,
 | `poll`        | start a poll in the background (`status` follows it)                               |
 
 `list_items`, `get_item`, `update_item` and `add_item` take a `register` (see "Registers"), `updates`,
-`ack`, `track`, `subscribe` and `unsubscribe` a `subscription` (see "Subscriptions"). The last seven
+`ack`, `track`, `subscribe` and `unsubscribe` a `subscription` (see "Subscriptions"). The last six
 change things and are **off by default**: with `mcp.read_only` unset or `true` in
 `data/config.yaml` they are not listed, and calling one is answered as an unknown tool. The whole tool
 list is kept under 1,000 tokens, which every session that uses the server pays; a test checks it. What the

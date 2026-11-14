@@ -270,7 +270,7 @@ export function createTools(ctx: Context, opts: ToolsOptions = {}): WatcherTools
       },
     },
     {
-      write: true,
+      write: false, // moves a cursor in the cache only: without it a read-only server could never move past what it was told
       def: {
         name: "ack",
         description: "Moves the subscription's cursor to a token from updates.",

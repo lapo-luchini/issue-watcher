@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
 import { openContext } from "../src/core/context.ts";
-import { acknowledge, defineSubscription, subscriptionUpdates } from "../src/core/following.ts";
+import { acknowledge, defineSubscription, subscriptionUpdates, trackItem } from "../src/core/following.ts";
 import { itemId } from "../src/core/store.ts";
 
 afterEach(cleanupTmp);
@@ -81,6 +81,32 @@ test("a reader that reads and acknowledges while two other processes store event
     expect(got).toHaveLength(300);
     expect(new Set(got).size).toBe(300);
     expect(ctx.store.subscriptionCursor("p")).toBe(300);
+  } finally {
+    ctx.store.close();
+  }
+}, 120_000);
+
+test("a subscription made or followed while two other processes store events misses none after its cursor starts", async () => {
+  const home = newHome();
+  const ctx = await openContext(home);
+  try {
+    const url = "https://github.com/foo/bar/pull/1";
+    writeFileSync(join(home, "data/items.yaml"), `items:\n  - url: ${url}\n`);
+    ctx.store.upsertItem({
+      url, id: itemId(url), instance: "github", kind: "pr", repo: "foo/bar", title: "t", state: "open", stateDetail: null, ciState: null,
+      hasConflicts: false, authoredByMe: false, maintainedByMe: false, labels: [], lastSignalAt: null, lastSignalSummary: null, seenAt: null,
+      baselineAt: "2026-11-01T00:00:00.000Z", fetchedAt: "2026-11-04T10:00:00.000Z", snapshotJson: null,
+    });
+    const path = join(home, "var/cache.sqlite");
+    const writers = Promise.all([run("event-writer.ts", path, url, "a", "150"), run("event-writer.ts", path, url, "b", "150")]);
+    await defineSubscription(ctx, "late", { all: true }); // made while they write
+    await trackItem(ctx, "tracked", url);
+    expect(await writers).toEqual([0, 0]);
+    const start = ctx.store.subscriptionCursor("late")!;
+    const r = await subscriptionUpdates(ctx, "late");
+    expect(r.items.flatMap((g) => g.events)).toHaveLength(300 - start); // every event numbered after its cursor, none missing
+    const floor = ctx.store.floors("tracked").get(url)!;
+    expect((await subscriptionUpdates(ctx, "tracked")).items.flatMap((g) => g.events)).toHaveLength(300 - floor);
   } finally {
     ctx.store.close();
   }
