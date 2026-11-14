@@ -10,6 +10,8 @@ export const ITEMS_FILE = "data/items.yaml";
 const REGISTERS_DIR = "data/registers";
 // A name is a file name: lowercase letters, digits, "-" and "_", starting with a letter or digit.
 const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** True for a name that is safe as a file name or a key: registers and subscriptions use the same rule. */
+export const isValidName = (name: string): boolean => NAME.test(name);
 
 /** A bad register name, or one that does not exist; the message names only what the caller passed, so it may be shown. */
 export class RegisterError extends Error {}
