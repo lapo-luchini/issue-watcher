@@ -126,24 +126,6 @@ export interface ItemUpdates {
   events: EventView[]; // newest detection first
 }
 
-/**
- * The news the watcher detected after `since`, grouped by item, the item with the latest detection
- * first; muted items are left out. By detection time rather than the event's own, so changes that
- * reach the watcher late (Radicle) are not missed.
- */
-export function updates(store: Store, intent: Intent, since: Date): ItemUpdates[] {
-  const items = new Map(listItems(store, intent).map((v) => [v.url, v]));
-  const groups = new Map<string, ItemUpdates>();
-  for (const e of store.signalEventsDetectedAfter(since.toISOString())) {
-    const item = items.get(e.itemUrl);
-    if (!item) continue; // muted (or no longer listed)
-    let group = groups.get(item.url);
-    if (!group) groups.set(item.url, (group = { item, events: [] }));
-    group.events.push(eventView(e));
-  }
-  return [...groups.values()]; // the store's order puts the item with the latest detection first
-}
-
 export interface InstanceStatus {
   id: string;
   type: string;

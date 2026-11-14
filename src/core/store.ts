@@ -280,15 +280,6 @@ export class Store {
       .all({ itemUrl }).map(toEvent);
   }
 
-  /**
-   * The news (signal events, baseline history excluded) first stored after `since`, newest
-   * detection first. By detection time, not the event's own: events that reach us late are included.
-   */
-  signalEventsDetectedAfter(since: string): EventRow[] {
-    return this.db.query(`SELECT * FROM events WHERE is_signal = 1 AND is_baseline = 0 AND detected_at > $since
-      ORDER BY detected_at DESC, item_url, event_key`).all({ since }).map(toEvent);
-  }
-
   /** The highest sequence number given so far (0: none). */
   maxSeq(): number {
     return (this.db.query("SELECT COALESCE(MAX(seq), 0) AS n FROM events").get() as { n: number }).n;
