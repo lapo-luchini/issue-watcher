@@ -15,6 +15,7 @@ import { Store } from "./core/store.ts";
 import { serve } from "./mcp/protocol.ts";
 import { createTools } from "./mcp/tools.ts";
 import { startServer } from "./server.ts";
+import { runSubscriptionCommand, SUBSCRIPTION_COMMANDS, SUBSCRIPTION_USAGE } from "./subscriptions-cli.ts";
 
 const USAGE = `usage: watcher <command> [options]
 
@@ -24,7 +25,8 @@ const USAGE = `usage: watcher <command> [options]
   seen URL... | seen --all           mark the given items (or all items) seen
   refilter                           re-run the noise filter over stored events
   serve [--port N] [--host H]        web UI on http://127.0.0.1:8411/ (env: WATCHER_PORT, WATCHER_HOST)
-  mcp                                MCP server on stdin/stdout, for an AI assistant (see README)`;
+  mcp                                MCP server on stdin/stdout, for an AI assistant (see README)
+${SUBSCRIPTION_USAGE}`;
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -36,6 +38,9 @@ async function main(argv: string[]): Promise<number> {
       all: { type: "boolean" },
       muted: { type: "boolean" },
       register: { type: "string" },
+      subscription: { type: "string" },
+      peek: { type: "boolean" },
+      json: { type: "boolean" },
       port: { type: "string" },
       host: { type: "string" },
       help: { type: "boolean", short: "h" },
@@ -71,6 +76,9 @@ async function main(argv: string[]): Promise<number> {
     console.log("watcher: stopping (waiting for a running poll, if any)");
     await srv.stop();
     return 0;
+  }
+  if (SUBSCRIPTION_COMMANDS.includes(cmd)) {
+    return runSubscriptionCommand(cmd, args, { home, subscription: values.subscription, register: values.register, all: values.all, json: values.json });
   }
   const register = values.register ?? registerFromEnv(process.env); // a bad name is an error before anything is opened
   if (values.register !== undefined) registerFile(register);
