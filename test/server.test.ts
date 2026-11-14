@@ -414,8 +414,7 @@ test("a register file that does not parse is that subscription's error, not the 
 test("a system error in the status carries no path", async () => {
   addRegister("items:\n");
   await send("PUT", "/api/subscriptions/mine", { register: "houston" });
-  rmSync(houston());
-  mkdirSync(houston()); // reading a directory: EISDIR, whose message names the path
+  chmodSync(houston(), 0o000); // reading it: EACCES, whose message names the path
   const [mine] = (await (await api("/api/subscription-status")).json()).subscriptions;
   expect(mine.error).toBeTruthy();
   expect(mine.error).not.toContain(home);
