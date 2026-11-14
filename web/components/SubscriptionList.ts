@@ -31,7 +31,11 @@ export const SubscriptionList = defineComponent({
               <h2 class="sub__name">{{ s.name }}</h2>
               <span class="sub__state">{{ unseenText(s) }}</span>
             </div>
-            <p class="sub__meta">Register <code>{{ s.register }}</code> · {{ scopeText(s) }} · {{ cursorText(s) }}</p>
+            <p class="sub__meta">
+              <span>Register <code>{{ s.register }}</code></span>
+              <span>{{ scopeText(s) }}</span>
+              <span>{{ cursorText(s) }}</span>
+            </p>
             <ul v-if="s.items.length" class="sub__news">
               <li v-for="i in s.items" :key="i.url">
                 <a v-if="webHref(i.url)" :href="webHref(i.url)" target="_blank" rel="noopener noreferrer">{{ i.title }}</a>

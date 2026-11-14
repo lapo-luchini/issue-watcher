@@ -50,7 +50,7 @@ export const TopBar = defineComponent({
   template: `
     <header class="topbar">
       <div class="topbar__head">
-        <h1 class="topbar__title">Watcher <span v-if="unreadCount" class="topbar__count">{{ unreadCount }} unread</span></h1>
+        <h1 class="topbar__title">Watcher <span v-if="unreadCount && view === 'items'" class="topbar__count">{{ unreadCount }} unread</span></h1>
         <div class="topbar__actions">
           <template v-if="view === 'items'">
             <button type="button" @click="adding = !adding" :aria-expanded="adding">Add item</button>

@@ -7,7 +7,7 @@
   --muted: #5b6b7b;
   --rule: #d5dce3;
   --unread: #2f4bd8;
-  --star: #b7791f;
+  --star: #8f5a0c;
   --bad: #b42318;
   --good: #1f7a4d;
   --focus: #2f4bd8;
@@ -38,7 +38,7 @@ body {
   color: var(--ink);
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
 }
-#app { max-width: 64rem; margin: 0 auto; padding: 0 1rem 4rem; }
+#app { max-width: 64rem; margin: 0 auto; padding: 0 max(1rem, env(safe-area-inset-right)) 4rem max(1rem, env(safe-area-inset-left)); }
 a { color: inherit; }
 code { font-family: var(--mono); font-size: 0.9em; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
@@ -54,7 +54,7 @@ button { padding: 0.35rem 0.8rem; cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--muted); }
 button:disabled { opacity: 0.55; cursor: default; }
 button.primary { background: var(--unread); border-color: var(--unread); color: var(--surface); font-weight: 600; }
-select, input, textarea { padding: 0.35rem 0.55rem; }
+select, input, textarea { padding: 0.35rem 0.55rem; font-size: 1rem; } /* 16px: iPhone Safari zooms into smaller fields */
 
 /* Top bar */
 .topbar { padding: 1.5rem 0 0.75rem; border-bottom: 1px solid var(--rule); }
@@ -65,7 +65,7 @@ select, input, textarea { padding: 0.35rem 0.55rem; }
 .add-form { display: grid; grid-template-columns: 2fr 1.4fr auto; gap: 0.5rem; margin-top: 1rem; }
 .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1.1rem; margin-top: 1rem; color: var(--muted); }
 .filters label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
-.filters input { accent-color: var(--unread); }
+.filters input { width: 1.5rem; height: 1.5rem; accent-color: var(--unread); }
 .instances { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; margin: 0.75rem 0 0; padding: 0; list-style: none; font-size: 0.85rem; color: var(--muted); }
 .instance::before { content: ""; display: inline-block; width: 0.5rem; height: 0.5rem; margin-right: 0.35rem; border-radius: 50%; background: var(--good); }
 .instance--bad { color: var(--bad); }
@@ -94,13 +94,14 @@ select, input, textarea { padding: 0.35rem 0.55rem; }
 .sub__state { font-size: 0.9rem; font-weight: 600; color: var(--muted); }
 .sub--unseen .sub__state { color: var(--unread); }
 .sub--bad .sub__state { color: var(--bad); }
-.sub__meta { margin: 0.2rem 0 0; font-size: 0.9rem; color: var(--muted); }
+.sub__meta { display: flex; flex-wrap: wrap; gap: 0.1rem 1rem; margin: 0.2rem 0 0; font-size: 0.9rem; color: var(--muted); }
+.sub__meta span { white-space: nowrap; }
 .sub__news { margin: 0.6rem 0 0; padding: 0; list-style: none; }
-.sub__news li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.1rem 1rem; padding: 0.3rem 0; border-top: 1px dashed var(--rule); }
-.sub__news a { overflow-wrap: anywhere; }
+.sub__news li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.1rem 1rem; padding: 0.3rem 0; border-top: 1px dashed var(--rule); }
+.sub__news a { display: inline-flex; align-items: center; min-height: 2.75rem; overflow-wrap: anywhere; }
 .sub__count { font-size: 0.85rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sub__more { margin-top: 0.5rem; font-size: 0.9rem; color: var(--muted); }
-.sub__more summary { cursor: pointer; min-height: 2rem; padding: 0.3rem 0; }
+.sub__more summary { padding: 0.75rem 0; cursor: pointer; } /* the padding makes it a 44px target and keeps the disclosure marker */
 .sub__more ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
 .sub__more li { overflow-wrap: anywhere; }
 
@@ -115,7 +116,8 @@ select, input, textarea { padding: 0.35rem 0.55rem; }
 .item--open { background: var(--surface); }
 .item__row { display: grid; grid-template-columns: auto 1fr auto; gap: 0.25rem 0.75rem; align-items: start; padding: 0.7rem 0.75rem 0.7rem 0.5rem; cursor: pointer; }
 .item__row:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); }
-.star { border: 0; background: none; padding: 0 0.15rem; font-size: 1.15rem; line-height: 1.3; color: var(--muted); }
+/* A 44px target that takes no more room than the glyph did (the negative margins). */
+.star { display: flex; align-items: center; justify-content: center; min-width: 2.75rem; min-height: 2.75rem; margin: -0.7rem -0.5rem -0.7rem -0.7rem; border: 0; background: none; padding: 0; font-size: 1.15rem; line-height: 1.3; color: var(--muted); }
 .star[aria-pressed="true"] { color: var(--star); }
 .item__main { min-width: 0; }
 .item__title { font-weight: 500; text-decoration: none; overflow-wrap: anywhere; }
@@ -157,6 +159,11 @@ select, input, textarea { padding: 0.35rem 0.55rem; }
   background: var(--ink); color: var(--paper); border-radius: 6px; font-size: 0.9rem;
 }
 
+/* Touch targets of 44px on phones and tablets. */
+@media (max-width: 64rem), (pointer: coarse) {
+  button:not(.star), select, input:not([type="checkbox"]) { min-height: 2.75rem; }
+  .filters label { min-height: 2.75rem; }
+}
 @media (max-width: 40rem) {
   .add-form { grid-template-columns: 1fr; }
   .item__row { grid-template-columns: auto 1fr; }

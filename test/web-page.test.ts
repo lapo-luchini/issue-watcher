@@ -43,6 +43,15 @@ test("the nav links the two views, marks the current one and counts what is unse
   expect(subs).not.toContain("unseen");
 });
 
+test("the unread count is about items: it shows on the items view and not on the subscription view", async () => {
+  expect(await topbar({ unreadCount: 2 })).toContain("2 unread");
+  expect(await topbar({ unreadCount: 2, view: "subscriptions" })).not.toContain("2 unread");
+});
+
+test("the page covers the whole phone screen (viewport-fit=cover), its safe-area insets keeping the text clear", async () => {
+  expect(await Bun.file(new URL("../web/index.html", import.meta.url)).text()).toContain("viewport-fit=cover");
+});
+
 test("the subscription view has no item filters, register switcher, adding or mark-all-seen: it only polls", async () => {
   const html = await topbar({ view: "subscriptions", registers: ["default", "houston"] });
   for (const gone of ['aria-label="Filters"', 'aria-label="Register"', "Add item", "Mark all seen"]) expect(html).not.toContain(gone);
