@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS poll_runs (
   finished_at TEXT NOT NULL, cursor TEXT, error TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscription_cursors (name TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS subscription_floors (name TEXT NOT NULL, url TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (name, url));
 CREATE TABLE IF NOT EXISTS retry (
   instance TEXT NOT NULL, item_url TEXT NOT NULL, kind TEXT NOT NULL, attempts INTEGER NOT NULL,
   last_error TEXT NOT NULL, first_since TEXT, PRIMARY KEY (instance, item_url)
@@ -296,6 +298,45 @@ export class Store {
   signalEventsBetween(after: number, upTo: number): EventRow[] {
     return this.db.query(`SELECT * FROM events WHERE is_signal = 1 AND is_baseline = 0 AND seq > $after AND seq <= $upTo
       ORDER BY seq DESC`).all({ after, upTo }).map(toEvent);
+  }
+
+  /** Where a subscription has read up to (an event's sequence number), or null when it has no cursor yet. */
+  subscriptionCursor(name: string): number | null {
+    const r = this.db.query("SELECT seq FROM subscription_cursors WHERE name = $name").get({ name }) as { seq: number } | null;
+    return r?.seq ?? null;
+  }
+
+  /** The cursor, created at the newest number when there is none: a subscription starts with what comes after it. */
+  startCursor(name: string): number {
+    this.db.query("INSERT OR IGNORE INTO subscription_cursors (name, seq) VALUES ($name, (SELECT COALESCE(MAX(seq), 0) FROM events))").run({ name });
+    return this.subscriptionCursor(name)!;
+  }
+
+  /**
+   * Moves the cursor to `to` and returns where it is. Forward only (an old acknowledgement cannot
+   * take it back), and null, nothing moved, when `to` is a number no event has (it would swallow
+   * the news to come) or the subscription has no cursor.
+   */
+  advanceCursor(name: string, to: number): number | null {
+    const r = this.db.query(`UPDATE subscription_cursors SET seq = MAX(seq, $to)
+      WHERE name = $name AND $to <= (SELECT COALESCE(MAX(seq), 0) FROM events) RETURNING seq`).get({ name, to }) as { seq: number } | null;
+    return r?.seq ?? null;
+  }
+
+  /** Item URL -> the number from which its events count for a subscription with an explicit scope. */
+  floors(name: string): Map<string, number> {
+    const rows = this.db.query("SELECT url, seq FROM subscription_floors WHERE name = $name").all({ name }) as { url: string; seq: number }[];
+    return new Map(rows.map((r) => [r.url, r.seq]));
+  }
+
+  /** Items followed from now on: their earlier events are not news (see `track`). */
+  setFloor(name: string, url: string): void {
+    this.db.query(`INSERT INTO subscription_floors (name, url, seq) VALUES ($name, $url, (SELECT COALESCE(MAX(seq), 0) FROM events))
+      ON CONFLICT (name, url) DO UPDATE SET seq = excluded.seq`).run({ name, url });
+  }
+
+  dropFloor(name: string, url: string): void {
+    this.db.query("DELETE FROM subscription_floors WHERE name = $name AND url = $url").run({ name, url });
   }
 
   setVerdict(itemUrl: string, key: string, v: Verdict): void {
