@@ -227,3 +227,30 @@ test("a subscription whose register has no file is an error the caller can read,
   writeFileSync(join(home, "data/subscriptions.yaml"), `subscriptions:\n  - name: lost\n    register: gone\n    scope: all\n`);
   await expect(subscriptionUpdates(ctx, "lost")).rejects.toThrow("no such register: gone");
 });
+
+test("an event stored while the read runs is above the token: the ack does not swallow it", async () => {
+  await define("p");
+  store([A, "a1"]); // 1
+  const midRead: Context = { ...ctx, intent: async (register) => { store([B, "b-meanwhile"]); return ctx.intent(register); } }; // stored after the number was taken
+  const r = await subscriptionUpdates(midRead, "p");
+  expect(r.token).toBe("p.1");
+  expect(keys(r)).toEqual(["a1"]);
+  await acknowledge(ctx, "p", r.token);
+  expect(keys(await subscriptionUpdates(ctx, "p"))).toEqual(["b-meanwhile"]);
+});
+
+test("a token with no number is refused, not read as 0", async () => {
+  await define("p");
+  store([A, "a1"]);
+  expect((await acknowledge(ctx, "p", "p.").catch((e) => e)).message).toContain("not from p's updates");
+});
+
+test("floors belong to an explicit scope: made all, the subscription is given the item's earlier news again", async () => {
+  await define("p", "default", false);
+  store([A, "a-before"]); // 1
+  await trackItem(ctx, "p", A); // floor of A is 1
+  expect(keys(await subscriptionUpdates(ctx, "p"))).toEqual([]);
+  await define("p", "default", true); // all: no floor applies
+  ctx.store.db.query("UPDATE subscription_cursors SET seq = 0 WHERE name = 'p'").run();
+  expect(keys(await subscriptionUpdates(ctx, "p"))).toEqual(["a-before"]);
+});
