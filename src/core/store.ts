@@ -179,6 +179,12 @@ export class Store {
     this.addColumnIfMissing("items", "created_at", "TEXT");
     this.addColumnIfMissing("items", "updated_at", "TEXT");
     this.addColumnIfMissing("events", "approx_at", "TEXT");
+    // The sequence number of detection (see insertEvent). Caches from before it: numbered in detection order.
+    if (this.addColumnIfMissing("events", "seq", "INTEGER")) {
+      this.db.exec(`UPDATE events SET seq = o.n FROM
+        (SELECT rowid AS r, ROW_NUMBER() OVER (ORDER BY detected_at, rowid) AS n FROM events) AS o WHERE events.rowid = o.r`);
+    }
+    this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS events_seq ON events (seq)");
   }
 
   /** Returns true if the column was missing and has been added. */
@@ -244,13 +250,17 @@ export class Store {
       });
   }
 
-  /** Returns false if the event was already stored (dedup by item + key). */
+  /**
+   * Returns false if the event was already stored (dedup by item + key). A stored event takes the
+   * next sequence number, counted in the same statement that stores it, so numbers follow the order
+   * in which writers commit; events are never deleted, so a number is never given twice.
+   */
   insertEvent(e: EventRow): boolean {
     const res = this.db.query(`
       INSERT OR IGNORE INTO events (item_url, event_key, kind, actor, actor_role, at, detected_at,
-        excerpt, details_json, is_signal, reason, is_baseline, approx_at)
+        excerpt, details_json, is_signal, reason, is_baseline, approx_at, seq)
       VALUES ($itemUrl, $key, $kind, $actor, $actorRole, $at, $detectedAt, $excerpt, $details,
-        $isSignal, $reason, $isBaseline, $approxAt)`)
+        $isSignal, $reason, $isBaseline, $approxAt, (SELECT COALESCE(MAX(seq), 0) + 1 FROM events))`)
       .run({
         ...e,
         details: e.details ? JSON.stringify(e.details) : null,
@@ -275,6 +285,17 @@ export class Store {
   signalEventsDetectedAfter(since: string): EventRow[] {
     return this.db.query(`SELECT * FROM events WHERE is_signal = 1 AND is_baseline = 0 AND detected_at > $since
       ORDER BY detected_at DESC, item_url, event_key`).all({ since }).map(toEvent);
+  }
+
+  /** The highest sequence number given so far (0: none). */
+  maxSeq(): number {
+    return (this.db.query("SELECT COALESCE(MAX(seq), 0) AS n FROM events").get() as { n: number }).n;
+  }
+
+  /** The news (signal events, baseline history excluded) numbered after `after` up to and including `upTo`, newest number first. */
+  signalEventsBetween(after: number, upTo: number): EventRow[] {
+    return this.db.query(`SELECT * FROM events WHERE is_signal = 1 AND is_baseline = 0 AND seq > $after AND seq <= $upTo
+      ORDER BY seq DESC`).all({ after, upTo }).map(toEvent);
   }
 
   setVerdict(itemUrl: string, key: string, v: Verdict): void {
