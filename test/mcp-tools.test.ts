@@ -511,12 +511,13 @@ test("a read error names the register's file, never a path", async () => {
   }
 });
 
-test("a register file that is not valid YAML is told as it is (the parser's message has no path)", async () => {
+test("a register file that is not valid YAML is told in one line naming the register file, not as a read failure", async () => {
   await open();
   addRegister("houston", "items: [unclosed\n");
   const err = await tools.call("list_items", { register: "houston" }).catch((e) => e);
   expect(err).toBeInstanceOf(ToolError);
-  expect(err.message).not.toContain("could not read");
+  expect(err.message).toStartWith("registers/houston.yaml: not valid YAML at line 1");
+  expect(err.message).not.toContain("\n");
   expect(err.message).not.toContain(home);
 });
 
