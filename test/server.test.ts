@@ -398,6 +398,29 @@ test("a subscription on a register that is gone says so and does not fail the ot
   expect(proj).toMatchObject({ name: "proj", error: null });
 });
 
+test("a register file that does not parse is that subscription's error, not the whole view's", async () => {
+  addRegister("items:\n");
+  await send("PUT", "/api/subscriptions/mine", { register: "houston" });
+  await send("PUT", "/api/subscriptions/proj", { all: true });
+  writeFileSync(houston(), "items: 3\n");
+  const res = await api("/api/subscription-status");
+  expect(res.status).toBe(200);
+  const [mine, proj] = (await res.json()).subscriptions;
+  expect(mine).toMatchObject({ name: "mine", unseen: 0, items: [] });
+  expect(mine.error).toContain("'items' must be a list");
+  expect(proj).toMatchObject({ name: "proj", error: null });
+});
+
+test("a system error in the status carries no path", async () => {
+  addRegister("items:\n");
+  await send("PUT", "/api/subscriptions/mine", { register: "houston" });
+  rmSync(houston());
+  mkdirSync(houston()); // reading a directory: EISDIR, whose message names the path
+  const [mine] = (await (await api("/api/subscription-status")).json()).subscriptions;
+  expect(mine.error).toBeTruthy();
+  expect(mine.error).not.toContain(home);
+});
+
 test("a subscriptions.yaml that does not parse is a 400 with its text on the status endpoint", async () => {
   writeFileSync(join(home, "data/subscriptions.yaml"), "subscriptions:\n  - name: p\n    scope: some\n");
   const res = await api("/api/subscription-status");

@@ -90,8 +90,9 @@ export async function subscriptionStatus(ctx: Context, sub: Subscription): Promi
       status.items.push({ url: item.url, id: item.id, title: item.title, count: events.length });
     }
   } catch (err) {
-    if (!(err instanceof RegisterError)) throw err;
-    status.error = err.message;
+    // One register's trouble (gone, or a file that does not parse) is told on its own subscription, not on the whole view.
+    // A system error's message carries a path: only that the register could not be read.
+    status.error = /^E[A-Z0-9]+$/.test(String((err as NodeJS.ErrnoException).code)) ? `register ${sub.register} could not be read` : (err as Error).message;
   }
   return status;
 }
