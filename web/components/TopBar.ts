@@ -54,7 +54,7 @@ export const TopBar = defineComponent({
         <div class="topbar__actions">
           <template v-if="view === 'items'">
             <button type="button" @click="adding = !adding" :aria-expanded="adding">Add item</button>
-            <button type="button" :disabled="!unreadCount" @click="$emit('all-seen')">Mark all seen</button>
+            <button type="button" :disabled="!unreadCount" @click="$emit('all-seen')">{{ register === 'default' ? 'Mark all seen' : 'Mark all seen in every register' }}</button>
           </template>
           <button type="button" class="primary" :disabled="status?.polling" @click="$emit('poll')">
             {{ status?.polling ? 'Polling…' : 'Poll now' }}

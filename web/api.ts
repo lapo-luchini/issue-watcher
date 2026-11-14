@@ -37,6 +37,7 @@ let register = DEFAULT_REGISTER;
 export const setRegister = (name: string) => {
   register = name;
 };
+export const getRegister = () => register;
 const inRegister = (path: string) => withRegister(path, register);
 
 export const api = {

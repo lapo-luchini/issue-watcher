@@ -43,6 +43,12 @@ test("the nav links the two views, marks the current one and counts what is unse
   expect(subs).not.toContain("unseen");
 });
 
+test("Mark all seen says it covers every register when another register is on screen", async () => {
+  expect(await topbar({ unreadCount: 1 })).toContain(">Mark all seen</button>");
+  const other = await topbar({ unreadCount: 1, registers: ["default", "houston"], register: "houston" });
+  expect(other).toContain("Mark all seen in every register");
+});
+
 test("the unread count is about items: it shows on the items view and not on the subscription view", async () => {
   expect(await topbar({ unreadCount: 2 })).toContain("2 unread");
   expect(await topbar({ unreadCount: 2, view: "subscriptions" })).not.toContain("2 unread");

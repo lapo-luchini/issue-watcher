@@ -41,5 +41,24 @@ export const orderSubscriptions = (list: SubscriptionStatus[]): SubscriptionStat
 
 export const totalUnseen = (list: SubscriptionStatus[]): number => list.reduce((n, s) => n + s.unseen, 0);
 
+/**
+ * Runs `ask` and reports its outcome only while `current()` still gives what it gave when asked: an answer
+ * for a register that was switched away from meanwhile is dropped, never shown under the new one.
+ */
+export async function whileCurrent<K, T>(
+  current: () => K, ask: () => Promise<T>, done: { ok: (answer: T) => void; fail: (err: Error) => void; always?: () => void },
+): Promise<void> {
+  const asked = current();
+  const still = () => current() === asked;
+  try {
+    const answer = await ask();
+    if (still()) done.ok(answer);
+  } catch (err) {
+    if (still()) done.fail(err as Error);
+  } finally {
+    if (still()) done.always?.();
+  }
+}
+
 /** 24-hour "14:05". */
 export const clock = (d: Date): string => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

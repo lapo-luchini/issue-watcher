@@ -3,7 +3,7 @@ import { api, setRegister, type Filters, type ItemView, type Status, type Subscr
 import { ItemRow } from "./components/ItemRow.ts";
 import { SubscriptionList } from "./components/SubscriptionList.ts";
 import { TopBar } from "./components/TopBar.ts";
-import { clock, pickRegister, totalUnseen, viewFromHash } from "./view.ts";
+import { clock, pickRegister, totalUnseen, viewFromHash, whileCurrent } from "./view.ts";
 import iconDark from "./favicon.svg";
 import iconLit from "./favicon-lit.svg";
 import { computed, createApp, defineComponent, onMounted, onUnmounted, ref, watch } from "./vue.ts";
@@ -55,20 +55,15 @@ const App = defineComponent({
       clearTimeout(messageTimer);
       messageTimer = setTimeout(() => (message.value = ""), 6000);
     }
-    async function load() {
-      const asked = register.value;
-      try {
-        const answer = (await api.items(filters.value)).items;
-        if (asked !== register.value) return; // the register was switched meanwhile: this answer is for the old one
-        items.value = answer;
+    // An answer for a register that was switched away from meanwhile is dropped (whileCurrent).
+    const load = () => whileCurrent(() => register.value, () => api.items(filters.value), {
+      ok: (answer) => {
+        items.value = answer.items;
         error.value = "";
-      } catch (err) {
-        if (asked !== register.value) return;
-        error.value = (err as Error).message;
-      } finally {
-        if (asked === register.value) loaded.value = true;
-      }
-    }
+      },
+      fail: (err) => (error.value = err.message),
+      always: () => (loaded.value = true),
+    });
     async function loadStatus() {
       try {
         status.value = await api.status();

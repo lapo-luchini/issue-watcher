@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import type { SubscriptionStatus } from "../src/core/following.ts";
 import {
-  clock, cursorText, orderSubscriptions, pickRegister, scopeText, totalUnseen, unseenText, viewFromHash, withRegister,
+  clock, cursorText, orderSubscriptions, pickRegister, scopeText, totalUnseen, unseenText, viewFromHash, whileCurrent, withRegister,
 } from "../web/view.ts";
 
 const sub = (over: Partial<SubscriptionStatus> = {}): SubscriptionStatus => ({
@@ -61,6 +61,62 @@ test("orderSubscriptions puts the ones with news first, keeping the file's order
 test("totalUnseen adds the updates of every subscription", () => {
   expect(totalUnseen([])).toBe(0);
   expect(totalUnseen([sub({ unseen: 2 }), sub({ unseen: 3 }), sub()])).toBe(5);
+});
+
+const deferred = <T>() => {
+  let resolve!: (v: T) => void;
+  let reject!: (e: Error) => void;
+  const promise = new Promise<T>((res, rej) => ((resolve = res), (reject = rej)));
+  return { promise, resolve, reject };
+};
+const record = () => {
+  const log: string[] = [];
+  return { log, done: { ok: (t: string) => log.push(`ok ${t}`), fail: (e: Error) => log.push(`fail ${e.message}`), always: () => log.push("always") } };
+};
+
+test("whileCurrent hands the answer over while the key is what it was when asked", async () => {
+  const { log, done } = record();
+  await whileCurrent(() => "default", async () => "a", done);
+  expect(log).toEqual(["ok a", "always"]);
+});
+
+test("whileCurrent drops an answer that arrives after the key changed (an old register's items never show under the new one)", async () => {
+  let key = "default";
+  const slow = deferred<string>();
+  const { log, done } = record();
+  const pending = whileCurrent(() => key, () => slow.promise, done);
+  key = "houston";
+  slow.resolve("items of default");
+  await pending;
+  expect(log).toEqual([]);
+});
+
+test("whileCurrent drops a late failure too, and reports a current one", async () => {
+  let key = "default";
+  const late = deferred<string>();
+  const a = record();
+  const pending = whileCurrent(() => key, () => late.promise, a.done);
+  key = "houston";
+  late.reject(new Error("no such register"));
+  await pending;
+  expect(a.log).toEqual([]);
+  const b = record();
+  await whileCurrent(() => key, () => Promise.reject(new Error("down")), b.done);
+  expect(b.log).toEqual(["fail down", "always"]);
+});
+
+test("whileCurrent: two asks out of order, only the one for the current key lands", async () => {
+  let key = "default";
+  const first = deferred<string>();
+  const second = deferred<string>();
+  const { log, done } = record();
+  const p1 = whileCurrent(() => key, () => first.promise, done);
+  key = "houston";
+  const p2 = whileCurrent(() => key, () => second.promise, done);
+  second.resolve("houston items");
+  first.resolve("default items");
+  await Promise.all([p1, p2]);
+  expect(log).toEqual(["ok houston items", "always"]);
 });
 
 test("clock is a 24-hour time", () => {
