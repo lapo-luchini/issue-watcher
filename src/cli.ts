@@ -86,7 +86,7 @@ async function main(argv: string[]): Promise<number> {
     // stdout carries the protocol and nothing else; problems go to stderr (and exit code 1).
     const ctx = await openContext(home);
     try {
-      const tools = createTools(ctx, { register });
+      const tools = createTools(ctx, { register, subscription: process.env.WATCHER_SUBSCRIPTION || undefined });
       await serve(Bun.stdin.stream(), async (line) => void (await Bun.write(Bun.stdout, line)), tools, { name: "watcher", version: pkg.version });
       await tools.idle(); // stdin closed while a poll started by the assistant runs: let it finish
     } finally {

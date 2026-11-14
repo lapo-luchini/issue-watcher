@@ -174,16 +174,29 @@ test("mcp: initialize, tools/list and tools/call over stdio; stdout is protocol 
     { jsonrpc: "2.0", method: "notifications/initialized" },
     { jsonrpc: "2.0", id: 2, method: "tools/list" },
     { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "list_items", arguments: { unread: true } } },
-    { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "mark_seen", arguments: { all: true } } },
+    { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "ack", arguments: { token: "p.0" } } },
   ]);
   expect(r.code).toBe(0);
   expect(r.replies.map((x) => x.id)).toEqual([1, 2, 3, 4]);
   expect(r.replies[0].result).toMatchObject({ protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "watcher", version: "0.1.0" } });
-  expect(r.replies[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["list_items", "get_item", "list_registers", "updates", "status"]);
+  expect(r.replies[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["list_items", "get_item", "list_registers", "list_subscriptions", "updates", "status"]);
   const items = JSON.parse(r.replies[2].result.content[0].text).items;
   expect(items).toMatchObject([{ url: PR, title: "Fix build", unread: true }]);
   expect(r.replies[3].error.code).toBe(-32602);
   expect(seenAt()).toBeNull();
+});
+
+test("mcp: WATCHER_SUBSCRIPTION is the subscription of calls that name none, checked only when a call needs it", () => {
+  const ask = (env: Record<string, string>) => mcp([
+    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_subscriptions", arguments: {} } },
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "updates", arguments: {} } },
+  ], env).replies;
+  const none = ask({});
+  expect(JSON.parse(none[0].result.content[0].text).default).toBeNull();
+  expect(none[1].result.isError).toBe(true);
+  expect(none[1].result.content[0].text).toContain("no subscription");
+  expect(JSON.parse(ask({ WATCHER_SUBSCRIPTION: "mine" })[0].result.content[0].text).default).toBe("mine");
+  expect(ask({ WATCHER_SUBSCRIPTION: "../x" })[0].result.isError).toBeUndefined(); // a bad name does not stop the server
 });
 
 test("mcp: WATCHER_REGISTER is the register of calls that name none", () => {
