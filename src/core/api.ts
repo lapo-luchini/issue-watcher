@@ -108,7 +108,7 @@ export interface EventView {
   isBaseline: boolean;
 }
 
-function eventView(e: EventRow): EventView {
+export function eventView(e: EventRow): EventView {
   return {
     key: e.key, kind: e.kind, actor: e.actor, actorRole: e.actorRole,
     at: e.approxAt ?? e.at, reportedAt: e.approxAt ? e.at : null, detectedAt: e.detectedAt,
@@ -200,7 +200,7 @@ const inRegister = (register: string) => (register === DEFAULT_REGISTER ? "" : `
 
 // Writes to items.yaml happen one at a time (the server may get two requests at once).
 let writes: Promise<unknown> = Promise.resolve();
-function serialized<T>(fn: () => Promise<T>): Promise<T> {
+export function serialized<T>(fn: () => Promise<T>): Promise<T> {
   const next = writes.then(fn, fn);
   writes = next.catch(() => {});
   return next;
@@ -247,6 +247,8 @@ export interface LockTiming {
 export class ItemsBusyError extends Error {}
 /** `addItem` refused the URL; the message names only what the caller passed, so it may be shown. */
 export class ItemRefusedError extends Error {}
+/** `addItem` refused because the item is already listed or known; `track` goes on from there. */
+export class AlreadyTrackedError extends ItemRefusedError {}
 const LOCK_TIMING: LockTiming = { waitMs: 30_000, staleMs: 60_000, beatMs: 10_000, claimMs: 10_000 };
 
 /**
@@ -368,12 +370,16 @@ export function breakIfStale(lock: string, mine: string, staleMs: number, claimM
   } catch {} // already gone
 }
 
-async function rewriteItems(where: IntentRepo, register: string, edit: (text: string) => string, message: string): Promise<CommitResult> {
-  const file = registerFile(register);
+/** Edits one file of the watcher's data under the one items lock (registers and subscriptions share it: every commit moves the same branch) and commits it. `check` runs first, under the lock. */
+export function rewriteFile(where: IntentRepo, file: string, edit: (text: string) => string, message: string, check?: () => void): Promise<CommitResult> {
   return withItemsLock(where.home, () => {
-    checkRegisterFile(where.home, register);
+    check?.();
     return rewriteLocked(where, file, edit, message);
   });
+}
+
+function rewriteItems(where: IntentRepo, register: string, edit: (text: string) => string, message: string): Promise<CommitResult> {
+  return rewriteFile(where, registerFile(register), edit, message, () => checkRegisterFile(where.home, register));
 }
 
 async function rewriteLocked(where: IntentRepo, file: string, edit: (text: string) => string, message: string): Promise<CommitResult> {
@@ -427,7 +433,7 @@ export function addItem(
   if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) return Promise.reject(new ItemRefusedError(`not a web URL: ${url}`));
   const ref = recognize(url);
   const canonical = ref?.url ?? url;
-  if (intent.has(canonical) || (register === DEFAULT_REGISTER && store.getItem(canonical))) return Promise.reject(new ItemRefusedError(`already tracked: ${canonical}`));
+  if (intent.has(canonical) || (register === DEFAULT_REGISTER && store.getItem(canonical))) return Promise.reject(new AlreadyTrackedError(`already tracked: ${canonical}`));
   const manual = !ref;
   const message = `watcher: add ${manual ? "manual item " : ""}${itemLabel(canonical)}${inRegister(register)}`;
   return serialized(async () => ({

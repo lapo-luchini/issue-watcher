@@ -9,6 +9,7 @@ import { loadIntent, type Intent } from "./intent.ts";
 import type { ItemRef } from "./model.ts";
 import { DEFAULT_REGISTER, listRegisterNames, mergeIntents, registerFile, registerLabel, RegisterError } from "./registers.ts";
 import { Store } from "./store.ts";
+import { loadSubscriptions, SUBSCRIPTIONS_FILE, type Subscription } from "./subscriptions.ts";
 
 export interface Context {
   home: string; // the watcher's directory: data/config.yaml, data/items.yaml, data/registers/, var/cache.sqlite
@@ -27,6 +28,10 @@ export interface Context {
   registers: () => string[];
   /** The entries of all registers as one: what the poll fetches (see mergeIntents). A broken register other than `default` is skipped, with a warning on stderr. */
   allIntent: () => Promise<Intent>;
+  /** The subscriptions (data/subscriptions.yaml; none when there is no file), their URLs canonical, read on every call. A file that cannot be read is an error. */
+  subscriptions: () => Promise<Map<string, Subscription>>;
+  /** What is wrong with the data files, one line each, naming files by their label, never by path: a register other than `default` that the poll skips, a subscriptions file that cannot be read. */
+  problems: () => Promise<string[]>;
 }
 
 /** Throws (before opening the cache) when the config is missing or invalid. The caller closes the store. */
@@ -41,12 +46,23 @@ export async function openContext(home: string): Promise<Context> {
     const label = registerLabel(register);
     return canonicalIntentFor(config, await loadIntent(join(home, file), label), label).intent;
   };
+  const canonical = (url: string) => recognize(url)?.url ?? url;
+  const subscriptions = async () => {
+    const subs = await loadSubscriptions(join(home, SUBSCRIPTIONS_FILE));
+    for (const s of subs.values()) {
+      if (s.scope !== "all") s.scope = s.scope.map(canonical);
+      s.exclude = s.exclude.map(canonical);
+    }
+    return subs;
+  };
+  /** What a failed read of a file says without a path: a system error (its message carries the path) only that it could not be read. */
+  const safeMessage = (label: string, err: unknown) =>
+    /^E[A-Z0-9]+$/.test(String((err as NodeJS.ErrnoException).code)) ? `${label}: could not be read` : (err as Error).message;
   return {
-    home, config, recognize,
-    canonical: (url) => recognize(url)?.url ?? url,
+    home, config, recognize, canonical,
     where: { home, branch: config.commitBranch },
     store: new Store(join(home, "var/cache.sqlite")),
-    intent, registers,
+    intent, registers, subscriptions,
     // A register file that cannot be read is skipped with a warning, so one project's hand edit does not stop the poll for all; `default` (the tool's own file) still fails loudly.
     allIntent: async () => mergeIntents(await Promise.all(registers().map(async (r) => {
       try {
@@ -57,5 +73,13 @@ export async function openContext(home: string): Promise<Context> {
         return new Map();
       }
     }))),
+    problems: async () => {
+      const out: string[] = [];
+      for (const r of registers().filter((r) => r !== DEFAULT_REGISTER)) {
+        await intent(r).catch((err) => out.push(`${safeMessage(registerLabel(r), err)} (the poll skips this register)`));
+      }
+      await subscriptions().catch((err) => out.push(safeMessage("subscriptions.yaml", err)));
+      return out;
+    },
   };
 }

@@ -295,9 +295,9 @@ export class Store {
   }
 
   /** The news (signal events, baseline history excluded) numbered after `after` up to and including `upTo`, newest number first. */
-  signalEventsBetween(after: number, upTo: number): EventRow[] {
+  signalEventsBetween(after: number, upTo: number): (EventRow & { seq: number })[] {
     return this.db.query(`SELECT * FROM events WHERE is_signal = 1 AND is_baseline = 0 AND seq > $after AND seq <= $upTo
-      ORDER BY seq DESC`).all({ after, upTo }).map(toEvent);
+      ORDER BY seq DESC`).all({ after, upTo }).map((r: any) => ({ ...toEvent(r), seq: r.seq as number }));
   }
 
   /** Where a subscription has read up to (an event's sequence number), or null when it has no cursor yet. */
