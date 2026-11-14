@@ -129,3 +129,15 @@ test("the forge status dots belong to the items view; a forge that failed still 
   expect(subs).not.toContain('class="instance ');
   expect(subs).toContain("codeberg: last poll failed");
 });
+
+test("Poll now sits with the title, above the item actions, so a phone top bar stays short", async () => {
+  const html = await topbar({ unreadCount: 1 });
+  expect(html.indexOf("Poll now")).toBeLessThan(html.indexOf("Add item"));
+  expect(html.indexOf("Poll now")).toBeLessThan(html.indexOf('class="topbar__actions"'));
+});
+
+test("on another register Mark all seen stays available: it covers every register, not only the one on screen", async () => {
+  const other = await topbar({ unreadCount: 0, registers: ["default", "houston"], register: "houston" });
+  expect(other).not.toMatch(/<button[^>]*disabled[^>]*>Mark all seen/);
+  expect(await topbar({ unreadCount: 0 })).toMatch(/<button[^>]*disabled[^>]*>Mark all seen/);
+});

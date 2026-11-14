@@ -51,15 +51,13 @@ export const TopBar = defineComponent({
     <header class="topbar">
       <div class="topbar__head">
         <h1 class="topbar__title">Watcher <span v-if="unreadCount && view === 'items'" class="topbar__count">{{ unreadCount }} unread</span></h1>
-        <div class="topbar__actions">
-          <template v-if="view === 'items'">
-            <button type="button" @click="adding = !adding" :aria-expanded="adding">Add item</button>
-            <button type="button" :disabled="!unreadCount" @click="$emit('all-seen')">{{ register === 'default' ? 'Mark all seen' : 'Mark all seen (all registers)' }}</button>
-          </template>
-          <button type="button" class="primary" :disabled="status?.polling" @click="$emit('poll')">
-            {{ status?.polling ? 'Polling…' : 'Poll now' }}
-          </button>
-        </div>
+        <button type="button" class="primary" :disabled="status?.polling" @click="$emit('poll')">
+          {{ status?.polling ? 'Polling…' : 'Poll now' }}
+        </button>
+      </div>
+      <div v-if="view === 'items'" class="topbar__actions">
+        <button type="button" @click="adding = !adding" :aria-expanded="adding">Add item</button>
+        <button type="button" :disabled="!unreadCount && register === 'default'" @click="$emit('all-seen')">{{ register === 'default' ? 'Mark all seen' : 'Mark all seen (all registers)' }}</button>
       </div>
       <div class="views">
         <nav class="views__nav" aria-label="View">
