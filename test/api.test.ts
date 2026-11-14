@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
-import { getItem, instanceStatus, itemEvents, itemLabel, listItems, markSeen } from "../src/core/api.ts";
+import { getItem, instanceStatus, itemEvents, itemLabel, listItems, markSeen, parseIntentChange } from "../src/core/api.ts";
 import { DEFAULT_FILTER, type Config } from "../src/core/config.ts";
 import { parseIntent } from "../src/core/intent.ts";
 import { itemId, Store, type ItemRow } from "../src/core/store.ts";
@@ -116,7 +116,7 @@ test("instanceStatus: last run and last success per configured instance", () => 
       { id: "kde", type: "gitlab", url: "https://invent.kde.org/api/v4", user: "u", emails: [], disabledReason: "missing KDE_TOKEN in .env" },
     ],
     filter: DEFAULT_FILTER,
-    commitBranch: "config",
+    commitBranch: "config", mcpReadOnly: true,
   };
   store.recordRun({ instance: "github", startedAt: "2026-11-04T10:00:00.000Z", finishedAt: "2026-11-04T10:01:00.000Z", cursor: "c1", error: null });
   store.recordRun({ instance: "github", startedAt: "2026-11-04T11:00:00.000Z", finishedAt: "2026-11-04T11:01:00.000Z", cursor: "c1", error: "boom" });
@@ -144,4 +144,43 @@ test("markSeen by url or all", () => {
   expect(listItems(store, new Map(), { unreadOnly: true }).map((v) => v.url)).toEqual([B]);
   expect(markSeen(store, [], now)).toBe(2);
   expect(listItems(store, new Map(), { unreadOnly: true })).toEqual([]);
+});
+
+test("parseIntentChange: priority, muted and note, checked; says what is wrong", () => {
+  expect(parseIntentChange({ priority: "important", muted: false, note: null })).toEqual({ priority: "important", muted: false, note: null });
+  expect(parseIntentChange({ priority: null })).toEqual({ priority: null });
+  expect(() => parseIntentChange({ priority: "urgent" })).toThrow("priority must be 'important', 'normal' or null");
+  expect(() => parseIntentChange({ muted: "yes" })).toThrow("muted must be true or false");
+  expect(() => parseIntentChange({ note: 3 })).toThrow("note must be text or null");
+  expect(() => parseIntentChange({ title: "x" })).toThrow("unknown field 'title'");
+  expect(() => parseIntentChange({})).toThrow("nothing to change");
+});
+
+test("a register other than default lists its own entries; default lists everything the cache has", () => {
+  store.upsertItem(row(A, { lastSignalAt: "2026-11-03T00:00:00.000Z" }));
+  store.upsertItem(row(B, { lastSignalAt: "2026-11-04T00:00:00.000Z" }));
+  const inFoo = parseIntent(`items:\n  - url: ${A}\n    priority: important\n  - url: https://lists.example.org/p1\n    manual: true\n    title: "[PATCH] x"\n`);
+  expect(listItems(store, inFoo, { register: "foo" }).map((v) => v.url)).toEqual([A, "https://lists.example.org/p1"]);
+  expect(listItems(store, inFoo, { register: "foo" })[0]).toMatchObject({ priority: "important" });
+  // `default` (or no register named) is the whole cache, as before registers.
+  expect(listItems(store, inFoo, { register: "default" }).map((v) => v.url)).toEqual([A, B, "https://lists.example.org/p1"]);
+  expect(listItems(store, inFoo).map((v) => v.url)).toEqual([A, B, "https://lists.example.org/p1"]);
+});
+
+test("an entry's mute counts in its own register only", () => {
+  store.upsertItem(row(A, { lastSignalAt: "2026-11-03T00:00:00.000Z" }));
+  const mutedInFoo = parseIntent(`items:\n  - url: ${A}\n    muted: true\n`);
+  const plain = parseIntent("items: []");
+  expect(listItems(store, mutedInFoo, { register: "foo" })).toEqual([]);
+  expect(listItems(store, mutedInFoo, { register: "foo", includeMuted: true })).toHaveLength(1);
+  expect(listItems(store, plain, { register: "default" })).toHaveLength(1);
+});
+
+test("getItem finds an item in a register only if it is an entry of it", () => {
+  store.upsertItem(row(A, {}));
+  store.upsertItem(row(B, {}));
+  const inFoo = parseIntent(`items:\n  - url: ${A}\n`);
+  expect(getItem(store, inFoo, itemId(A), "foo")?.url).toBe(A);
+  expect(getItem(store, inFoo, itemId(B), "foo")).toBeNull();
+  expect(getItem(store, inFoo, itemId(B))?.url).toBe(B);
 });

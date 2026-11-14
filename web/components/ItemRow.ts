@@ -1,7 +1,8 @@
 // One tracked item: unread bar, star, title (opening it marks the item seen), where it lives,
 // its latest signal and when. Clicking the row opens its history and actions.
-import { api, type ItemView } from "../api.ts";
+import { api, getRegister, type ItemView } from "../api.ts";
 import { absoluteTime, relativeTime } from "../time.ts";
+import { whileCurrent } from "../view.ts";
 import { computed, defineComponent, ref, type PropType } from "../vue.ts";
 import { EventList } from "./EventList.ts";
 
@@ -42,15 +43,15 @@ export const ItemRow = defineComponent({
     }
     async function change(c: Parameters<typeof api.change>[1], done: string) {
       busy.value = true;
-      try {
-        const r = await api.change(props.item.id, c);
-        emit("changed", r.item);
-        emit("message", r.warning ? `${done}, but not committed: ${r.warning}` : done);
-      } catch (err) {
-        emit("message", `Not saved: ${(err as Error).message}`);
-      } finally {
-        busy.value = false;
-      }
+      // The answer of a change made in another register (switched away from meanwhile) is not shown on this one's rows.
+      await whileCurrent(getRegister, () => api.change(props.item.id, c), {
+        ok: (r) => {
+          emit("changed", r.item);
+          emit("message", r.warning ? `${done}, but not committed: ${r.warning}` : done);
+        },
+        fail: (err) => emit("message", `Not saved: ${err.message}`),
+      });
+      busy.value = false;
     }
     function toggleStar() {
       const target = props.item.priority === "important" ? "normal" : "important";

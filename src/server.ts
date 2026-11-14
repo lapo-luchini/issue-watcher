@@ -1,17 +1,19 @@
 // HTTP front end: the JSON API of spec section 6 plus the web UI (web/index.html, bundled by Bun
 // on the fly). A thin layer over core/api.ts; the server never touches the store directly.
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import index from "../web/index.html";
-import { canonicalIntentFor, createAdapter, urlRecognizer } from "./adapters/index.ts";
+import { createAdapter } from "./adapters/index.ts";
 import {
-  addItem, changeIntent, getItem, instanceStatus, itemEvents, listItems, markSeen, type ListOptions,
+  addItem, changeIntent, getItem, instanceStatus, itemEvents, listItems, markSeen, parseIntentChange, type ListOptions,
 } from "./core/api.ts";
-import { loadConfig, type InstanceConfig } from "./core/config.ts";
-import { loadIntent, type IntentChange } from "./core/intent.ts";
-import type { Adapter, Priority } from "./core/model.ts";
+import type { InstanceConfig } from "./core/config.ts";
+import { openContext } from "./core/context.ts";
+import { acknowledge, defineSubscription, subscriptionStatus, subscriptionUpdates, trackItem, untrackItem } from "./core/following.ts";
+import type { Intent, IntentChange } from "./core/intent.ts";
+import type { Adapter } from "./core/model.ts";
+import { runAfterPoll } from "./core/hook.ts";
 import { pollAll, type InstanceResult } from "./core/poller.ts";
-import { Store } from "./core/store.ts";
+import { checkRegisterName, DEFAULT_REGISTER, RegisterError } from "./core/registers.ts";
+import { SubscriptionError } from "./core/subscriptions.ts";
 
 export interface ServerOptions {
   home: string; // the watcher's directory: data/config.yaml, data/items.yaml, var/cache.sqlite
@@ -48,21 +50,12 @@ function withoutPort(host: string): string {
 
 export async function startServer(opts: ServerOptions) {
   const now = opts.now ?? (() => new Date());
-  const config = await loadConfig(join(opts.home, "data/config.yaml"));
-  const recognize = urlRecognizer(config);
-  const where = { home: opts.home, branch: config.commitBranch }; // where items.yaml changes are committed
-  const canonical = (url: string) => recognize(url)?.url ?? url;
-  mkdirSync(join(opts.home, "var"), { recursive: true });
-  const store = new Store(join(opts.home, "var/cache.sqlite"));
+  const ctx = await openContext(opts.home);
+  const { config, recognize, canonical, where, store } = ctx;
   const hostname = opts.hostname ?? "127.0.0.1";
   const allowedHosts = new Set((opts.allowedHosts ?? []).map((h) => withoutPort(h.trim())).filter((h) => h));
   let polling: Promise<void> | null = null;
   let lastPoll: PollReport | null = null;
-
-  /** items.yaml is read on every request, so hand edits and `git pull`s show up without a restart. */
-  async function intent() {
-    return canonicalIntentFor(config, await loadIntent(join(opts.home, "data/items.yaml"))).intent;
-  }
 
   /**
    * Guards every request. The Host header must be a loopback name or an allowed one: a page on
@@ -108,33 +101,55 @@ export async function startServer(opts: ServerOptions) {
     return b as Record<string, unknown>;
   }
 
-  async function itemOr404(id: string) {
-    const item = getItem(store, await intent(), id);
+  /** The register a request is about: `?register=`, default `default`. A bad name is a 400. */
+  function registerOf(req: Request): string {
+    const name = new URL(req.url).searchParams.get("register") ?? DEFAULT_REGISTER;
+    try {
+      return checkRegisterName(name);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  }
+
+  /** A register's entries; one that does not exist is a 404. */
+  async function entries(register: string): Promise<Intent> {
+    try {
+      return await ctx.intent(register);
+    } catch (err) {
+      if (err instanceof RegisterError) throw new HttpError(404, err.message);
+      throw err;
+    }
+  }
+
+  async function itemOr404(id: string, register: string) {
+    const item = getItem(store, await entries(register), id, register);
     if (!item) throw new HttpError(404, `no item ${id}`);
     return item;
   }
 
   function parseChange(b: Record<string, unknown>): IntentChange {
-    const change: IntentChange = {};
-    for (const key of Object.keys(b)) {
-      if (!["priority", "muted", "note"].includes(key)) throw new HttpError(400, `unknown field '${key}'`);
+    try {
+      return parseIntentChange(b);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
     }
-    if ("priority" in b) {
-      if (b.priority !== null && b.priority !== "important" && b.priority !== "normal") {
-        throw new HttpError(400, "priority must be 'important', 'normal' or null");
+  }
+
+  /**
+   * Runs a call of the subscription core. What it words itself (a bad name, token, register or URL, a file's syntax error) is told as it is:
+   * 404 for something that does not exist, else 400. A system error carries a path: logged, and said only as a failure.
+   */
+  async function following<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof SubscriptionError || err instanceof RegisterError) throw new HttpError(/^no such /.test(err.message) ? 404 : 400, err.message);
+      if (/^E[A-Z0-9]+$/.test(String((err as NodeJS.ErrnoException).code))) {
+        console.error(`watcher: ${(err as Error).message}`);
+        throw new HttpError(500, "could not read or write the subscription files");
       }
-      change.priority = b.priority as Priority | null;
+      throw new HttpError(400, (err as Error).message); // what the core words itself: a bad URL, a file's syntax error
     }
-    if ("muted" in b) {
-      if (typeof b.muted !== "boolean") throw new HttpError(400, "muted must be true or false");
-      change.muted = b.muted;
-    }
-    if ("note" in b) {
-      if (b.note !== null && typeof b.note !== "string") throw new HttpError(400, "note must be text or null");
-      change.note = b.note as string | null;
-    }
-    if (Object.keys(change).length === 0) throw new HttpError(400, "nothing to change");
-    return change;
   }
 
   function startPoll(): void {
@@ -142,7 +157,9 @@ export async function startServer(opts: ServerOptions) {
     const report = lastPoll;
     polling = (async () => {
       try {
-        report.results = await pollAll({ store, config, intent: await intent(), adapterFor: opts.adapterFor ?? createAdapter, now });
+        report.results = await pollAll({ store, config, intent: await ctx.allIntent(), adapterFor: opts.adapterFor ?? createAdapter, now });
+        const hook = await runAfterPoll(config.afterPoll, ctx.home);
+        if (hook) console.error(`watcher: warning: ${hook}`);
       } catch (err) {
         report.error = (err as Error).message;
       } finally {
@@ -163,16 +180,20 @@ export async function startServer(opts: ServerOptions) {
         GET: route(async (req) => {
           const q = new URL(req.url).searchParams;
           const on = (k: string) => q.get(k) === "1" || q.get(k) === "true";
-          const o: ListOptions = { unreadOnly: on("unread"), importantOnly: on("important"), includeMuted: on("muted") };
+          const register = registerOf(req);
+          const o: ListOptions = { unreadOnly: on("unread"), importantOnly: on("important"), includeMuted: on("muted"), register };
           if (q.get("instance")) o.instance = q.get("instance")!;
-          return json({ items: listItems(store, await intent(), o) });
+          return json({ items: listItems(store, await entries(register), o) });
         }),
         POST: route(async (req) => {
           const b = await body(req);
           if (typeof b.url !== "string") throw new HttpError(400, "url is required");
           if (b.title !== undefined && typeof b.title !== "string") throw new HttpError(400, "title must be text");
+          const register = registerOf(req);
           try {
-            const r = await addItem(where, store, await intent(), recognize, b.url.trim(), b.title as string | undefined);
+            // A register that does not exist yet is created by its first item.
+            const known = ctx.registers().includes(register) ? await entries(register) : new Map();
+            const r = await addItem(where, store, known, recognize, b.url.trim(), b.title as string | undefined, register);
             return json({ url: r.url, manual: r.manual, warning: r.commit.warning ?? null }, 201);
           } catch (err) {
             throw new HttpError(400, (err as Error).message);
@@ -180,24 +201,68 @@ export async function startServer(opts: ServerOptions) {
         }),
       },
       "/api/items/:id": {
-        GET: route(async (req) => json({ item: await itemOr404(req.params.id!) })),
+        GET: route(async (req) => json({ item: await itemOr404(req.params.id!, registerOf(req)) })),
         PATCH: route(async (req) => {
-          const item = await itemOr404(req.params.id!);
-          const r = await changeIntent(where, item.url, parseChange(await body(req)), canonical, item.instance ? item.repo : undefined);
-          return json({ item: await itemOr404(item.id), warning: r.warning ?? null });
+          const register = registerOf(req);
+          const item = await itemOr404(req.params.id!, register);
+          const r = await changeIntent(where, item.url, parseChange(await body(req)), canonical, item.instance ? item.repo : undefined, register);
+          return json({ item: await itemOr404(item.id, register), warning: r.warning ?? null });
         }),
       },
       "/api/items/:id/events": {
         GET: route(async (req) => {
-          const item = await itemOr404(req.params.id!);
+          const item = await itemOr404(req.params.id!, registerOf(req));
           const noise = new URL(req.url).searchParams.get("noise") === "1";
           return json({ events: itemEvents(store, item.url, noise) });
         }),
       },
       "/api/items/:id/seen": {
         POST: route(async (req) => {
-          const item = await itemOr404(req.params.id!);
+          const item = await itemOr404(req.params.id!, registerOf(req));
           return json({ marked: markSeen(store, [item.url], now()) });
+        }),
+      },
+      "/api/registers": { GET: route(() => json({ registers: ctx.registers() })) },
+      "/api/subscriptions": {
+        GET: route(async () => json({ subscriptions: [...(await following(() => ctx.subscriptions())).values()] })),
+      },
+      // Read-only: where each subscription stands (the web page's view); acknowledging stays the CLI's and MCP's.
+      "/api/subscription-status": {
+        GET: route(async () => {
+          const subs = [...(await following(() => ctx.subscriptions())).values()];
+          return json({ subscriptions: await following(() => Promise.all(subs.map((s) => subscriptionStatus(ctx, s)))) });
+        }),
+      },
+      "/api/subscriptions/:name": {
+        PUT: route(async (req) => {
+          const b = await body(req);
+          if (b.register !== undefined && typeof b.register !== "string") throw new HttpError(400, "register must be text");
+          if (b.all !== undefined && typeof b.all !== "boolean") throw new HttpError(400, "all must be true or false");
+          return json(await following(() => defineSubscription(ctx, req.params.name!, { register: b.register as string | undefined, all: b.all as boolean | undefined })));
+        }),
+      },
+      "/api/subscriptions/:name/updates": {
+        GET: route(async (req) => json(await following(() => subscriptionUpdates(ctx, req.params.name!)))),
+      },
+      "/api/subscriptions/:name/ack": {
+        POST: route(async (req) => {
+          const b = await body(req);
+          if (typeof b.token !== "string") throw new HttpError(400, "token is required");
+          return json(await following(() => acknowledge(ctx, req.params.name!, b.token as string)));
+        }),
+      },
+      "/api/subscriptions/:name/track": {
+        POST: route(async (req) => {
+          const b = await body(req);
+          if (typeof b.url !== "string") throw new HttpError(400, "url is required");
+          return json(await following(() => trackItem(ctx, req.params.name!, (b.url as string).trim())));
+        }),
+      },
+      "/api/subscriptions/:name/untrack": {
+        POST: route(async (req) => {
+          const b = await body(req);
+          if (typeof b.url !== "string") throw new HttpError(400, "url is required");
+          return json(await following(() => untrackItem(ctx, req.params.name!, (b.url as string).trim())));
         }),
       },
       "/api/seen": { POST: route(() => json({ marked: markSeen(store, [], now()) })) },
@@ -210,7 +275,7 @@ export async function startServer(opts: ServerOptions) {
         }),
       },
       "/api/status": {
-        GET: route(() => json({ instances: instanceStatus(store, config), polling: polling !== null, lastPoll })),
+        GET: route(async () => json({ instances: instanceStatus(store, config), polling: polling !== null, lastPoll, problems: await ctx.problems() })),
       },
       "/api/*": route(() => {
         throw new HttpError(404, "no such API endpoint");

@@ -3,21 +3,31 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import pkg from "../package.json" with { type: "json" };
 import { canonicalIntentFor, createAdapter, urlRecognizer } from "./adapters/index.ts";
 import { listItems, markSeen } from "./core/api.ts";
 import { loadConfig } from "./core/config.ts";
-import { loadIntent } from "./core/intent.ts";
+import { openContext } from "./core/context.ts";
+import { loadIntent, type Intent } from "./core/intent.ts";
+import { runAfterPoll } from "./core/hook.ts";
 import { pollAll, refilter } from "./core/poller.ts";
+import { DEFAULT_REGISTER, listRegisterNames, mergeIntents, registerFile, registerFromEnv, registerLabel } from "./core/registers.ts";
 import { Store } from "./core/store.ts";
+import { serve } from "./mcp/protocol.ts";
+import { createTools } from "./mcp/tools.ts";
 import { startServer } from "./server.ts";
+import { runSubscriptionCommand, SUBSCRIPTION_COMMANDS, SUBSCRIPTION_USAGE } from "./subscriptions-cli.ts";
 
 const USAGE = `usage: watcher <command> [options]
 
   poll [--instance ID] [--dry-run]   poll forges for changes (--dry-run saves nothing)
-  list [--all] [--muted]             show unread items (--all: every item)
+  list [--all] [--muted] [--register R]  show unread items (--all: every item) of a register (env: WATCHER_REGISTER, default "default")
+  registers                          the registers: data/items.yaml is "default", the files of data/registers/ the others
   seen URL... | seen --all           mark the given items (or all items) seen
   refilter                           re-run the noise filter over stored events
-  serve [--port N] [--host H]        web UI on http://127.0.0.1:8411/ (env: WATCHER_PORT, WATCHER_HOST)`;
+  serve [--port N] [--host H]        web UI on http://127.0.0.1:8411/ (env: WATCHER_PORT, WATCHER_HOST)
+  mcp                                MCP server on stdin/stdout, for an AI assistant (see README)
+${SUBSCRIPTION_USAGE}`;
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -28,6 +38,10 @@ async function main(argv: string[]): Promise<number> {
       "dry-run": { type: "boolean" },
       all: { type: "boolean" },
       muted: { type: "boolean" },
+      register: { type: "string" },
+      subscription: { type: "string" },
+      peek: { type: "boolean" },
+      json: { type: "boolean" },
       port: { type: "string" },
       host: { type: "string" },
       help: { type: "boolean", short: "h" },
@@ -64,9 +78,44 @@ async function main(argv: string[]): Promise<number> {
     await srv.stop();
     return 0;
   }
+  if (SUBSCRIPTION_COMMANDS.includes(cmd)) {
+    return runSubscriptionCommand(cmd, args, { home, subscription: values.subscription, register: values.register, all: values.all, json: values.json });
+  }
+  const register = values.register ?? registerFromEnv(process.env); // a bad name is an error before anything is opened
+  if (values.register !== undefined) registerFile(register);
+  if (cmd === "mcp") {
+    // stdout carries the protocol and nothing else; problems go to stderr (and exit code 1).
+    const ctx = await openContext(home);
+    try {
+      const tools = createTools(ctx, { register, subscription: process.env.WATCHER_SUBSCRIPTION || undefined });
+      await serve(Bun.stdin.stream(), async (line) => void (await Bun.write(Bun.stdout, line)), tools, { name: "watcher", version: pkg.version });
+      await tools.idle(); // stdin closed while a poll started by the assistant runs: let it finish
+    } finally {
+      ctx.store.close();
+    }
+    return 0;
+  }
   const config = await loadConfig(join(home, "data/config.yaml"));
-  const { intent, unknown } = canonicalIntentFor(config, await loadIntent(join(home, "data/items.yaml")));
-  for (const url of unknown) console.error(`watcher: warning: items.yaml: no configured instance recognizes ${url}; ignored`);
+  // Every register, each by canonical URL; what the poll shares is their union, `list` shows one.
+  const registers = listRegisterNames(home);
+  if (cmd === "list" && !registers.includes(register)) {
+    console.error(`watcher: no such register: ${register} (registers: ${registers.join(", ")})`);
+    return 2;
+  }
+  const entries = new Map<string, Intent>();
+  for (const name of registers) {
+    const label = registerLabel(name);
+    try {
+      const { intent, unknown } = canonicalIntentFor(config, await loadIntent(join(home, registerFile(name)), label), label);
+      for (const url of unknown) console.error(`watcher: warning: ${label}: no configured instance recognizes ${url}; ignored`);
+      entries.set(name, intent);
+    } catch (err) {
+      // Only the file in use must be right: a broken other register is skipped, as the servers' poll does.
+      if (name === DEFAULT_REGISTER || (cmd === "list" && name === register)) throw err;
+      console.error(`watcher: warning: ${label} skipped: ${(err as Error).message}`);
+    }
+  }
+  const intent = mergeIntents([...entries.values()]);
   mkdirSync(join(home, "var"), { recursive: true });
   const store = new Store(join(home, "var/cache.sqlite"));
   try {
@@ -80,16 +129,24 @@ async function main(argv: string[]): Promise<number> {
             : `${r.instance}: ERROR ${r.error} (${r.fetched} fetched, ${r.newSignals} new signal(s))`);
         }
         if (dryRun) console.log("(dry run: nothing was saved)");
+        else {
+          const hook = await runAfterPoll(config.afterPoll, home);
+          if (hook) console.error(`watcher: warning: ${hook}`);
+        }
         return results.every((r) => r.ok) ? 0 : 1;
       }
       case "list": {
-        const items = listItems(store, intent, { unreadOnly: !values.all, includeMuted: values.muted });
+        const items = listItems(store, entries.get(register) ?? new Map(), { unreadOnly: !values.all, includeMuted: values.muted, register });
         for (const i of items) {
           const flags = `${i.unread ? "●" : " "}${i.priority === "important" ? "★" : " "}`;
           console.log(`${flags} ${i.repo}  ${i.title}  [${i.state}${i.ciState ? `, CI ${i.ciState}` : ""}]`);
           console.log(`     ${i.lastSignalSummary ?? "—"}  ${i.url}`);
         }
         if (items.length === 0) console.log(values.all ? "no items" : "nothing unread");
+        return 0;
+      }
+      case "registers": {
+        for (const name of registers) console.log(name);
         return 0;
       }
       case "seen": {

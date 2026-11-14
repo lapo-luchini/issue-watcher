@@ -1,14 +1,25 @@
 // The watcher's single page: important items first, then everything else, most recent signal first.
-import { api, type Filters, type ItemView, type Status } from "./api.ts";
+import { api, ServerError, setRegister, type Filters, type ItemView, type Status, type SubscriptionStatus } from "./api.ts";
 import { ItemRow } from "./components/ItemRow.ts";
+import { SubscriptionList } from "./components/SubscriptionList.ts";
 import { TopBar } from "./components/TopBar.ts";
+import { clock, listProblem, pickRegister, totalUnseen, viewFromHash, whileCurrent } from "./view.ts";
 import iconDark from "./favicon.svg";
 import iconLit from "./favicon-lit.svg";
 import { computed, createApp, defineComponent, onMounted, onUnmounted, ref, watch } from "./vue.ts";
 
 const FILTERS_KEY = "watcher.filters";
 const DEFAULT_FILTERS: Filters = { unread: false, important: false, muted: false, instance: "" };
+const REGISTER_KEY = "watcher.register";
 const REFRESH_MS = 60_000;
+
+function savedRegister(): string | null {
+  try {
+    return localStorage.getItem(REGISTER_KEY);
+  } catch {
+    return null;
+  }
+}
 
 /** Filters are remembered per browser; storage may be unavailable (private windows). */
 function savedFilters(): Filters {
@@ -20,13 +31,22 @@ function savedFilters(): Filters {
 }
 
 const App = defineComponent({
-  components: { ItemRow, TopBar },
+  components: { ItemRow, SubscriptionList, TopBar },
   setup() {
     const filters = ref<Filters>(savedFilters());
+    const view = ref(viewFromHash(location.hash));
+    const registers = ref<string[]>([]);
+    const register = ref(pickRegister(savedRegister(), []));
+    setRegister(register.value);
+    const subscriptions = ref<SubscriptionStatus[]>([]);
+    const subsLoaded = ref(false);
+    const subsError = ref("");
+    const checkedAt = ref("");
     const items = ref<ItemView[]>([]);
     const status = ref<Status | null>(null);
     const loaded = ref(false);
     const error = ref("");
+    const errorFromServer = ref(false); // the server answered with an error (a bad register file) rather than not answering
     const message = ref("");
     let messageTimer: ReturnType<typeof setTimeout> | undefined;
     let refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -36,21 +56,45 @@ const App = defineComponent({
       clearTimeout(messageTimer);
       messageTimer = setTimeout(() => (message.value = ""), 6000);
     }
-    async function load() {
-      try {
-        items.value = (await api.items(filters.value)).items;
+    // An answer for a register that was switched away from meanwhile is dropped (whileCurrent).
+    const load = () => whileCurrent(() => register.value, () => api.items(filters.value), {
+      ok: (answer) => {
+        items.value = answer.items;
         error.value = "";
-      } catch (err) {
-        error.value = (err as Error).message;
-      } finally {
-        loaded.value = true;
-      }
-    }
+      },
+      fail: (err) => {
+        error.value = err.message;
+        errorFromServer.value = err instanceof ServerError;
+        if (errorFromServer.value) items.value = [];
+      },
+      always: () => (loaded.value = true),
+    });
     async function loadStatus() {
       try {
         status.value = await api.status();
       } catch {
         // The item list reports connection problems; the status line can stay as it was.
+      }
+    }
+    async function loadRegisters() {
+      try {
+        registers.value = (await api.registers()).registers;
+        // A register that was deleted meanwhile: back to default, not an error page.
+        const kept = pickRegister(register.value, registers.value);
+        if (kept !== register.value) register.value = kept;
+      } catch {
+        // The item list reports connection problems; the switcher can stay as it was.
+      }
+    }
+    async function loadSubscriptions() {
+      try {
+        subscriptions.value = (await api.subscriptionStatus()).subscriptions;
+        subsError.value = "";
+        checkedAt.value = clock(new Date());
+      } catch (err) {
+        subsError.value = (err as Error).message;
+      } finally {
+        subsLoaded.value = true;
       }
     }
     async function poll() {
@@ -74,7 +118,7 @@ const App = defineComponent({
         const found = p.results.reduce((n, r) => n + r.newSignals, 0);
         say(found ? `${found} new update${found === 1 ? "" : "s"}` : "Nothing new");
       }
-      await load();
+      await Promise.all([load(), loadSubscriptions()]);
     }
     async function allSeen() {
       await api.allSeen();
@@ -94,10 +138,26 @@ const App = defineComponent({
       }
       load();
     }, { deep: true });
+    // The other register: its items now, and the choice remembered. The list shows a blank state meanwhile, not the old register's items.
+    watch(register, (name) => {
+      try {
+        localStorage.setItem(REGISTER_KEY, name);
+      } catch {
+        // Not remembered: fine.
+      }
+      setRegister(name);
+      items.value = [];
+      error.value = ""; // the last register's problem is not this one's
+      loaded.value = false;
+      load();
+    }, { flush: "sync" });
     function refresh() {
       load();
       loadStatus();
+      loadRegisters();
+      loadSubscriptions();
     }
+    const onHash = () => (view.value = viewFromHash(location.hash));
     // Back to the tab: show the current state now, not at the next tick.
     function onVisible() {
       if (document.visibilityState === "visible") refresh();
@@ -107,9 +167,11 @@ const App = defineComponent({
       // Hidden tabs refresh too, so the tab's icon and title tell about news while in the background.
       refreshTimer = setInterval(refresh, REFRESH_MS);
       document.addEventListener("visibilitychange", onVisible);
+      window.addEventListener("hashchange", onHash);
     });
     onUnmounted(() => {
       clearInterval(refreshTimer);
+      window.removeEventListener("hashchange", onHash);
       document.removeEventListener("visibilitychange", onVisible);
     });
 
@@ -123,15 +185,22 @@ const App = defineComponent({
       document.title = n > 0 ? `(${n}) Watcher` : "Watcher";
     }, { immediate: true });
     const filtered = computed(() => filters.value.unread || filters.value.important || filters.value.instance !== "");
-    return { filters, items, status, loaded, error, message, important, rest, unreadCount, filtered, load, poll, allSeen, replace, say };
+    const subscriptionUnseen = computed(() => totalUnseen(subscriptions.value));
+    return {
+      filters, view, registers, register, items, status, loaded, error, errorFromServer, listProblem, message, important, rest, unreadCount, filtered, subscriptions, subsLoaded,
+      subsError, checkedAt, subscriptionUnseen, load, poll, allSeen, replace, say,
+    };
   },
   template: `
-    <TopBar v-model:filters="filters" :status="status" :unread-count="unreadCount"
-      @poll="poll" @all-seen="allSeen" @added="load" @message="say" />
-    <main class="list">
-      <p v-if="error" class="error">The watcher server is not answering ({{ error }}). Is <code>watcher serve</code> still running?</p>
+    <TopBar v-model:filters="filters" v-model:register="register" :status="status" :unread-count="unreadCount" :view="view"
+      :registers="registers" :subscription-unseen="subscriptionUnseen" @poll="poll" @all-seen="allSeen" @added="load" @message="say" />
+    <SubscriptionList v-if="view === 'subscriptions'" :subscriptions="subscriptions" :loaded="subsLoaded" :error="subsError" :checked-at="checkedAt" />
+    <main v-else class="list">
+      <p v-if="error && errorFromServer" class="error">{{ listProblem(register, error) }}</p>
+      <p v-else-if="error" class="error">The watcher server is not answering ({{ error }}). Is <code>watcher serve</code> still running?</p>
       <template v-else-if="loaded && items.length === 0">
         <p v-if="filtered" class="empty">Nothing matches these filters.</p>
+        <p v-else-if="register !== 'default'" class="empty">Nothing in the register <code>{{ register }}</code> yet. Add an item by its URL.</p>
         <p v-else class="empty">Nothing tracked yet. Run a poll, or add an item by its URL.</p>
       </template>
       <section v-if="important.length" aria-labelledby="h-important">

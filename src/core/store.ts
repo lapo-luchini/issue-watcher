@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS poll_runs (
   finished_at TEXT NOT NULL, cursor TEXT, error TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscription_cursors (name TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS subscription_floors (name TEXT NOT NULL, url TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (name, url));
 CREATE TABLE IF NOT EXISTS retry (
   instance TEXT NOT NULL, item_url TEXT NOT NULL, kind TEXT NOT NULL, attempts INTEGER NOT NULL,
   last_error TEXT NOT NULL, first_since TEXT, PRIMARY KEY (instance, item_url)
@@ -120,7 +122,7 @@ export function lockHolder(pid: number = process.pid): string {
  * True when `holder` is a process of this host and PID space that has exited. Other hosts,
  * namespaces, boots and formats cannot be checked from here: false.
  */
-function holderIsGone(holder: string): boolean {
+export function holderIsGone(holder: string): boolean {
   const m = holder.match(/^(\d+)@([^#]+)(?:#(.*))?$/);
   if (!m || m[2] !== hostname() || (m[3] ?? "") !== PID_SPACE) return false;
   try {
@@ -179,6 +181,14 @@ export class Store {
     this.addColumnIfMissing("items", "created_at", "TEXT");
     this.addColumnIfMissing("items", "updated_at", "TEXT");
     this.addColumnIfMissing("events", "approx_at", "TEXT");
+    // The sequence number of detection (see insertEvent). Caches from before it: numbered in detection order.
+    // Numbered on every open while a row has none, so a crash between the two steps is mended by the next open.
+    this.addColumnIfMissing("events", "seq", "INTEGER");
+    if (this.db.query("SELECT 1 FROM events WHERE seq IS NULL LIMIT 1").get()) {
+      this.db.exec(`UPDATE events SET seq = o.n FROM
+        (SELECT rowid AS r, ROW_NUMBER() OVER (ORDER BY detected_at, rowid) AS n FROM events) AS o WHERE events.rowid = o.r`);
+    }
+    this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS events_seq ON events (seq)");
   }
 
   /** Returns true if the column was missing and has been added. */
@@ -244,13 +254,18 @@ export class Store {
       });
   }
 
-  /** Returns false if the event was already stored (dedup by item + key). */
+  /**
+   * Returns false if the event was already stored (dedup by item + key). A stored event takes the
+   * next sequence number, counted in the same statement that stores it, so numbers follow the order
+   * in which writers commit; events are never deleted, so a number is never given twice.
+   */
   insertEvent(e: EventRow): boolean {
     const res = this.db.query(`
-      INSERT OR IGNORE INTO events (item_url, event_key, kind, actor, actor_role, at, detected_at,
-        excerpt, details_json, is_signal, reason, is_baseline, approx_at)
+      INSERT INTO events (item_url, event_key, kind, actor, actor_role, at, detected_at,
+        excerpt, details_json, is_signal, reason, is_baseline, approx_at, seq)
       VALUES ($itemUrl, $key, $kind, $actor, $actorRole, $at, $detectedAt, $excerpt, $details,
-        $isSignal, $reason, $isBaseline, $approxAt)`)
+        $isSignal, $reason, $isBaseline, $approxAt, (SELECT COALESCE(MAX(seq), 0) + 1 FROM events))
+      ON CONFLICT (item_url, event_key) DO NOTHING`)
       .run({
         ...e,
         details: e.details ? JSON.stringify(e.details) : null,
@@ -266,6 +281,56 @@ export class Store {
     const where = includeNoise ? "" : "AND is_signal = 1";
     return this.db.query(`SELECT * FROM events WHERE item_url = $itemUrl ${where} ORDER BY COALESCE(approx_at, at) DESC`)
       .all({ itemUrl }).map(toEvent);
+  }
+
+  /** The highest sequence number given so far (0: none). */
+  maxSeq(): number {
+    return (this.db.query("SELECT COALESCE(MAX(seq), 0) AS n FROM events").get() as { n: number }).n;
+  }
+
+  /** The news (signal events, baseline history excluded) numbered after `after` up to and including `upTo`, newest number first. */
+  signalEventsBetween(after: number, upTo: number): (EventRow & { seq: number })[] {
+    return this.db.query(`SELECT * FROM events WHERE is_signal = 1 AND is_baseline = 0 AND seq > $after AND seq <= $upTo
+      ORDER BY seq DESC`).all({ after, upTo }).map((r: any) => ({ ...toEvent(r), seq: r.seq as number }));
+  }
+
+  /** Where a subscription has read up to (an event's sequence number), or null when it has no cursor yet. */
+  subscriptionCursor(name: string): number | null {
+    const r = this.db.query("SELECT seq FROM subscription_cursors WHERE name = $name").get({ name }) as { seq: number } | null;
+    return r?.seq ?? null;
+  }
+
+  /** The cursor, created at the newest number when there is none: a subscription starts with what comes after it. */
+  startCursor(name: string): number {
+    this.db.query("INSERT OR IGNORE INTO subscription_cursors (name, seq) VALUES ($name, (SELECT COALESCE(MAX(seq), 0) FROM events))").run({ name });
+    return this.subscriptionCursor(name)!;
+  }
+
+  /**
+   * Moves the cursor to `to` and returns where it is. Forward only (an old acknowledgement cannot
+   * take it back), and null, nothing moved, when `to` is a number no event has (it would swallow
+   * the news to come) or the subscription has no cursor.
+   */
+  advanceCursor(name: string, to: number): number | null {
+    const r = this.db.query(`UPDATE subscription_cursors SET seq = MAX(seq, $to)
+      WHERE name = $name AND $to <= (SELECT COALESCE(MAX(seq), 0) FROM events) RETURNING seq`).get({ name, to }) as { seq: number } | null;
+    return r?.seq ?? null;
+  }
+
+  /** Item URL -> the number from which its events count for a subscription with an explicit scope. */
+  floors(name: string): Map<string, number> {
+    const rows = this.db.query("SELECT url, seq FROM subscription_floors WHERE name = $name").all({ name }) as { url: string; seq: number }[];
+    return new Map(rows.map((r) => [r.url, r.seq]));
+  }
+
+  /** Items followed from now on: their earlier events are not news (see `track`). */
+  setFloor(name: string, url: string): void {
+    this.db.query(`INSERT INTO subscription_floors (name, url, seq) VALUES ($name, $url, (SELECT COALESCE(MAX(seq), 0) FROM events))
+      ON CONFLICT (name, url) DO UPDATE SET seq = excluded.seq`).run({ name, url });
+  }
+
+  dropFloor(name: string, url: string): void {
+    this.db.query("DELETE FROM subscription_floors WHERE name = $name AND url = $url").run({ name, url });
   }
 
   setVerdict(itemUrl: string, key: string, v: Verdict): void {
