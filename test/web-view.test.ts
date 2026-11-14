@@ -40,8 +40,9 @@ test("scopeText says what a subscription follows", () => {
 });
 
 test("cursorText gives the number read up to against the newest, or says there is no cursor yet", () => {
-  expect(cursorText(sub({ cursor: 2, latest: 4 }))).toBe("Read up to update 2 of 4");
-  expect(cursorText(sub({ cursor: 1234, latest: 1234 }))).toBe("Read up to update 1,234 of 1,234");
+  expect(cursorText(sub({ cursor: 2, latest: 4 }))).toBe("2 updates behind");
+  expect(cursorText(sub({ cursor: 3, latest: 4 }))).toBe("1 update behind");
+  expect(cursorText(sub({ cursor: 1234, latest: 1234 }))).toBe("Not behind");
   expect(cursorText(sub({ cursor: null }))).toBe("No cursor yet: it starts at the first read");
 });
 
@@ -56,6 +57,11 @@ test("orderSubscriptions puts the ones with news first, keeping the file's order
   const list = [sub({ name: "a" }), sub({ name: "b", unseen: 1 }), sub({ name: "c" }), sub({ name: "d", unseen: 5 })];
   expect(orderSubscriptions(list).map((s) => s.name)).toEqual(["d", "b", "a", "c"]);
   expect(list.map((s) => s.name)).toEqual(["a", "b", "c", "d"]); // the input is left alone
+});
+
+test("orderSubscriptions puts the ones that cannot be told before all others", () => {
+  const list = [sub({ name: "a", unseen: 9 }), sub({ name: "b" }), sub({ name: "x", error: "no such register: x" }), sub({ name: "y", error: "boom" })];
+  expect(orderSubscriptions(list).map((s) => s.name)).toEqual(["x", "y", "a", "b"]);
 });
 
 test("totalUnseen adds the updates of every subscription", () => {

@@ -98,7 +98,7 @@ test("a file that does not parse is one line naming the file and the line, not t
   } catch (err) {
     message = (err as Error).message;
   }
-  expect(message).toStartWith("registers/houston.yaml: not valid YAML at line 1");
+  expect(message).toBe("registers/houston.yaml: not valid YAML at line 1");
   expect(message).not.toContain("\n");
   expect(message).not.toContain("unclosed");
 });

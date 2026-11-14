@@ -43,10 +43,11 @@ test("the nav links the two views, marks the current one and counts what is unse
   expect(subs).not.toContain("unseen");
 });
 
-test("Mark all seen says it covers every register when another register is on screen", async () => {
+test("Mark all seen says, in a short label, that it covers every register when another register is on screen", async () => {
   expect(await topbar({ unreadCount: 1 })).toContain(">Mark all seen</button>");
   const other = await topbar({ unreadCount: 1, registers: ["default", "houston"], register: "houston" });
-  expect(other).toContain("Mark all seen in every register");
+  expect(other).toContain(">Mark all seen (all registers)</button>");
+  expect(other).not.toContain("in every register");
 });
 
 test("the unread count is about items: it shows on the items view and not on the subscription view", async () => {
@@ -69,7 +70,8 @@ test("a subscription shows its name, register, scope, cursor and that it is up t
   expect(html).toContain(">proj</h2>");
   expect(html).toContain("default");
   expect(html).toContain("Every item of the register");
-  expect(html).toContain("Read up to update 2 of 4");
+  expect(html).toContain("2 updates behind");
+  expect(html).not.toContain("Read up to");
   expect(html).toContain("Up to date");
   expect(html).toContain("Checked 14:05");
 });
@@ -115,4 +117,15 @@ test("the view is read-only and says where acknowledging happens", async () => {
 test("the subscription with news comes first, whatever order the server sent", async () => {
   const html = await list({ subscriptions: [sub({ name: "calm" }), sub({ name: "busy", unseen: 2, items: [{ url: PR, id: "x", title: "T", count: 2 }] })] });
   expect(html.indexOf(">busy</h2>")).toBeLessThan(html.indexOf(">calm</h2>"));
+});
+
+test("the forge status dots belong to the items view; a forge that failed still gets its problem line on both", async () => {
+  const instance = (id: string, error: string | null) => ({ id, error, disabledReason: null, lastRunAt: null, lastSuccessAt: null });
+  const status = { polling: false, instances: [instance("github", null), instance("codeberg", "boom")] };
+  const items = await topbar({ status });
+  expect(items).toContain('class="instances"');
+  const subs = await topbar({ status, view: "subscriptions" });
+  expect(subs).not.toContain('class="instances"');
+  expect(subs).not.toContain('class="instance ');
+  expect(subs).toContain("codeberg: last poll failed");
 });

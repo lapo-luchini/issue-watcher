@@ -54,7 +54,7 @@ export const TopBar = defineComponent({
         <div class="topbar__actions">
           <template v-if="view === 'items'">
             <button type="button" @click="adding = !adding" :aria-expanded="adding">Add item</button>
-            <button type="button" :disabled="!unreadCount" @click="$emit('all-seen')">{{ register === 'default' ? 'Mark all seen' : 'Mark all seen in every register' }}</button>
+            <button type="button" :disabled="!unreadCount" @click="$emit('all-seen')">{{ register === 'default' ? 'Mark all seen' : 'Mark all seen (all registers)' }}</button>
           </template>
           <button type="button" class="primary" :disabled="status?.polling" @click="$emit('poll')">
             {{ status?.polling ? 'Polling…' : 'Poll now' }}
@@ -85,7 +85,7 @@ export const TopBar = defineComponent({
           <option v-for="i in instances" :key="i.id" :value="i.id">{{ i.id }}</option>
         </select>
       </div>
-      <ul class="instances">
+      <ul v-if="view === 'items'" class="instances">
         <li v-for="i in instances" :key="i.id" class="instance" :class="{ 'instance--bad': i.error || i.disabledReason }"
           :title="describe(i)">{{ i.id }}</li>
       </ul>

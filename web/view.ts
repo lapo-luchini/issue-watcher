@@ -32,7 +32,8 @@ export function scopeText(s: Pick<SubscriptionStatus, "scope" | "exclude">): str
 
 export function cursorText(s: Pick<SubscriptionStatus, "cursor" | "latest">): string {
   if (s.cursor === null) return "No cursor yet: it starts at the first read";
-  return `Read up to update ${count.format(s.cursor)} of ${count.format(s.latest)}`;
+  const behind = Math.max(0, s.latest - s.cursor);
+  return behind ? plural(behind, "update behind", "updates behind") : "Not behind";
 }
 
 export function unseenText(s: Pick<SubscriptionStatus, "unseen" | "error">): string {
@@ -40,8 +41,9 @@ export function unseenText(s: Pick<SubscriptionStatus, "unseen" | "error">): str
   return s.unseen ? plural(s.unseen, "unseen update", "unseen updates") : "Up to date";
 }
 
-/** Those with the most unseen updates first; the others keep their order. */
-export const orderSubscriptions = (list: SubscriptionStatus[]): SubscriptionStatus[] => [...list].sort((a, b) => b.unseen - a.unseen);
+/** Those that cannot be told first, then those with the most unseen updates; the others keep their order. */
+export const orderSubscriptions = (list: SubscriptionStatus[]): SubscriptionStatus[] =>
+  [...list].sort((a, b) => Number(!!b.error) - Number(!!a.error) || b.unseen - a.unseen);
 
 export const totalUnseen = (list: SubscriptionStatus[]): number => list.reduce((n, s) => n + s.unseen, 0);
 

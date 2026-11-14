@@ -90,6 +90,6 @@ test("a subscriptions file that does not parse is one line naming the file and t
   } catch (err) {
     message = (err as Error).message;
   }
-  expect(message).toStartWith("subscriptions.yaml: not valid YAML at line 1");
+  expect(message).toBe("subscriptions.yaml: not valid YAML at line 1");
   expect(message).not.toContain("\n");
 });

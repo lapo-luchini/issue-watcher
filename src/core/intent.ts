@@ -25,9 +25,8 @@ export function parseYaml(text: string, file: string): unknown {
   try {
     return parse(text);
   } catch (err) {
-    const e = err as { message?: string; linePos?: { line: number }[] };
-    const what = String(e.message ?? "").split(/ at line \d+/)[0]!.trim();
-    throw new Error(`${file}: not valid YAML${e.linePos?.[0] ? ` at line ${e.linePos[0].line}` : ""}${what ? `: ${what}` : ""}`);
+    const e = err as { linePos?: { line: number }[] };
+    throw new Error(`${file}: not valid YAML${e.linePos?.[0] ? ` at line ${e.linePos[0].line}` : ""}`);
   }
 }
 
