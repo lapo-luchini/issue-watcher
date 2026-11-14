@@ -56,6 +56,7 @@ bun run watcher poll [--instance ID] [--dry-run]
 bun run watcher list [--all] [--muted]
 bun run watcher seen URL... | --all
 bun run watcher refilter
+bun run watcher updates|ack|subscribe|track|unsubscribe|subscriptions   (see "Subscriptions")
 bun run watcher serve [--port N] [--host H]
 bun run watcher mcp
 ```
@@ -131,16 +132,22 @@ periodically as usual; new data and hand edits to `items.yaml` are seen at once,
 | `list_items`  | the page's list: `unread`, `important`, `include_muted`, `instance` filter it      |
 | `get_item`    | one item (by URL or id) and its history; `include_filtered` adds the noise events  |
 | `list_registers` | the registers, and the one used when a call names none                          |
-| `updates`     | news detected after a time (`since`), by item                                      |
-| `status`      | the last poll per instance, and whether a poll is running                          |
-| `mark_seen`   | mark given items, or `all`, seen                                                   |
+| `list_subscriptions` | the subscriptions, and the one used when a call names none                  |
+| `updates`     | the news after a subscription's cursor, by item, with a token; moves nothing       |
+| `status`      | the last poll per instance, whether a poll is running, data files the poll skips   |
+| `ack`         | move a subscription's cursor to a token `updates` gave                             |
+| `track`       | add an item to the subscription's register if absent, and follow it                |
+| `subscribe`   | create a subscription or change its register and scope                             |
+| `unsubscribe` | stop following an item                                                             |
 | `update_item` | priority, mute and note, committed to the `config` branch as the web page does     |
 | `add_item`    | track an item by URL                                                               |
 | `poll`        | start a poll in the background (`status` follows it)                               |
 
-`list_items`, `get_item`, `update_item` and `add_item` take a `register` (see "Registers"); the
-others look at the cache as a whole. The last four change things and are **off by default**: with `mcp.read_only` unset or `true` in
-`data/config.yaml` they are not listed, and calling one is answered as an unknown tool. What the
+`list_items`, `get_item`, `update_item` and `add_item` take a `register` (see "Registers"), `updates`,
+`ack`, `track`, `subscribe` and `unsubscribe` a `subscription` (see "Subscriptions"). The last seven
+change things and are **off by default**: with `mcp.read_only` unset or `true` in
+`data/config.yaml` they are not listed, and calling one is answered as an unknown tool. The whole tool
+list is kept under 1,000 tokens, which every session that uses the server pays; a test checks it. What the
 assistant reads includes text written by strangers (titles, comment excerpts), and a prompt
 injected there must not be able to mute, annotate or add items. Allow writes only if you accept
 that:
@@ -172,6 +179,49 @@ you. A register's stars, mutes and notes are its own: they show only where the i
 Every register file is changed under the one lock `var/items.lock`, and each change is its own
 commit to the `config` branch (the message ends `(register NAME)` for a register other than
 `default`).
+
+## Subscriptions
+
+A subscription is what one reader follows: a register, which of its items (`all`, or a list of URLs, with
+an `exclude` list on `all`), and a read position in the cache (`var/cache.sqlite`), so each project reads
+the news once, whatever the others read. It is a file, `data/subscriptions.yaml`, on the `config` branch
+with the registers:
+
+```yaml
+subscriptions:
+  - name: houston
+    register: houston   # default: default
+    scope: all          # or a list of URLs; exclude: [urls] with all
+```
+
+- `watcher updates --subscription NAME` (or `WATCHER_SUBSCRIPTION=NAME`) prints the news after the
+  subscription's cursor, grouped by item, and a token. Reading never moves the cursor: `watcher ack TOKEN`
+  does, once the news is dealt with, so news that arrived in between is not lost. An old token is ignored.
+- A new subscription starts at the news of now: nothing older is announced. `subscribe NAME [--register R]
+  [--all]` makes or changes one; `track URL` adds the item to the register if absent and follows it (the
+  explicit scope starts with what is new after that); `unsubscribe URL` stops following it. `subscriptions`
+  lists them.
+- Muted entries of the subscription's register, excluded items and the global noise filter's noise are not
+  announced; an ack passes them too.
+- The web API: `GET /api/subscriptions`, `PUT /api/subscriptions/NAME` (`register`, `all`),
+  `GET .../NAME/updates`, `POST .../NAME/ack` (`token`), `POST .../NAME/track` and `.../untrack` (`url`).
+  `/api/status` and the `status` MCP tool list under `problems` what the poll skips (a register or the
+  subscriptions file that does not parse).
+- `seen` and `mark_seen` of the web page remain: that is the page's own unread mark, separate from cursors.
+  The MCP server has no `mark_seen` any more.
+
+### After a poll
+
+`after_poll` in `data/config.yaml` is a program and its arguments (a list, never a shell line):
+
+```yaml
+after_poll: [/path/to/notify, --subscription, houston]
+```
+
+It runs once a poll that saves is done (from `watcher poll`, the web page's poll and the MCP `poll`; not on
+`--dry-run`), in the watcher's directory with `WATCHER_HOME` set, at most 60 seconds, and its output is dropped.
+It typically calls `watcher updates`, and `watcher ack` once it has sent what it found. If it fails the poll
+is unaffected: a warning goes to stderr.
 
 ## Polling periodically
 
@@ -209,6 +259,7 @@ git push origin trunk                # publish trunk only; config stays local
 | `data/config.yaml` | on the `config` branch  | instances and filter tuning                          |
 | `data/items.yaml`  | on the `config` branch  | your intent: priority, mute, notes, manual items     |
 | `data/registers/`  | on the `config` branch  | more registers, same format (see "Registers")        |
+| `data/subscriptions.yaml` | on the `config` branch | subscriptions (see "Subscriptions")         |
 | `.env`             | no                      | tokens                                               |
 | `var/cache.sqlite` | no                      | cache; delete it to start over from a quiet baseline |
 

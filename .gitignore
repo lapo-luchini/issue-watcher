@@ -5,3 +5,4 @@ var/
 data/config.yaml
 data/items.yaml
 data/registers/
+data/subscriptions.yaml
