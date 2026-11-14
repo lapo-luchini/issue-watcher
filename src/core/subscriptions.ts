@@ -61,6 +61,12 @@ export function parseSubscriptions(text: string, file = "subscriptions.yaml"): M
   return out;
 }
 
+/** The subscriptions of the file at `path`; none when there is no file. */
+export async function loadSubscriptions(path: string, name = "subscriptions.yaml"): Promise<Map<string, Subscription>> {
+  const file = Bun.file(path);
+  return (await file.exists()) ? parseSubscriptions(await file.text(), name) : new Map();
+}
+
 /** A change to subscriptions.yaml. `define` makes or updates a subscription; `follow` and `unfollow` change what it follows. */
 export type SubscriptionEdit =
   | { kind: "define"; name: string; register: string; all?: boolean }
