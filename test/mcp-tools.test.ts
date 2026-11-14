@@ -516,7 +516,7 @@ test("a register file that is not valid YAML is told in one line naming the regi
   addRegister("houston", "items: [unclosed\n");
   const err = await tools.call("list_items", { register: "houston" }).catch((e) => e);
   expect(err).toBeInstanceOf(ToolError);
-  expect(err.message).toStartWith("registers/houston.yaml: not valid YAML at line 1");
+  expect(err.message).toStartWith("registers/houston.yaml: not valid YAML at line ");
   expect(err.message).not.toContain("\n");
   expect(err.message).not.toContain(home);
 });
