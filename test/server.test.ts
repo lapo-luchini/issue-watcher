@@ -251,6 +251,16 @@ test("GET / serves the web UI", async () => {
   expect(html).toMatch(/<link rel="icon" type="image\/svg\+xml" href="[^"]*favicon[^"]*\.svg"/);
 });
 
+test("the script the page loads carries the register switcher and the subscription view", async () => {
+  const html = await (await api("/")).text();
+  const src = html.match(/<script[^>]*src="([^"]+)"/)?.[1];
+  expect(src).toBeTruthy();
+  const res = await api(src!);
+  expect(res.status).toBe(200);
+  const js = await res.text();
+  for (const piece of ['aria-label="Register"', "/api/subscription-status", "/api/registers", "#subscriptions", "watcher ack"]) expect(js).toContain(piece);
+});
+
 test("subscriptions over HTTP: create, updates (never moving the cursor), ack, track, untrack, list", async () => {
   expect(await (await api("/api/subscriptions")).json()).toEqual({ subscriptions: [] });
   const made = await send("PUT", "/api/subscriptions/proj", { all: true });

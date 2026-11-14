@@ -72,6 +72,38 @@ select, input, textarea { padding: 0.35rem 0.55rem; }
 .instance--bad::before { background: var(--bad); }
 .problems { margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.85rem; color: var(--bad); }
 
+/* Views: items or subscriptions, and the register being shown */
+.views { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-top: 0.75rem; }
+.views__nav { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.views__nav a {
+  display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; padding: 0 0.9rem;
+  border-radius: 6px; border: 1px solid transparent; color: var(--muted); text-decoration: none; font-weight: 600;
+}
+.views__nav a:hover { border-color: var(--rule); }
+.views__nav a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--rule); }
+.views__count { font-size: 0.85rem; font-weight: 600; color: var(--unread); }
+.views__register { min-height: 2.75rem; max-width: 100%; font-size: 1rem; }
+
+/* Subscriptions */
+.subs__note { margin: 1.25rem 0 0.5rem; font-size: 0.9rem; color: var(--muted); }
+.subs { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
+.sub { padding: 0.9rem 0.75rem 0.9rem 0.5rem; border-bottom: 1px solid var(--rule); border-left: 4px solid transparent; }
+.sub--unseen { border-left-color: var(--unread); }
+.sub__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.2rem 1rem; }
+.sub__name { margin: 0; font-size: 1.05rem; font-weight: 650; overflow-wrap: anywhere; }
+.sub__state { font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+.sub--unseen .sub__state { color: var(--unread); }
+.sub--bad .sub__state { color: var(--bad); }
+.sub__meta { margin: 0.2rem 0 0; font-size: 0.9rem; color: var(--muted); }
+.sub__news { margin: 0.6rem 0 0; padding: 0; list-style: none; }
+.sub__news li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.1rem 1rem; padding: 0.3rem 0; border-top: 1px dashed var(--rule); }
+.sub__news a { overflow-wrap: anywhere; }
+.sub__count { font-size: 0.85rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sub__more { margin-top: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+.sub__more summary { cursor: pointer; min-height: 2rem; padding: 0.3rem 0; }
+.sub__more ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+.sub__more li { overflow-wrap: anywhere; }
+
 /* List */
 .list__heading { margin: 2rem 0 0.4rem; font-size: 0.95rem; font-weight: 650; color: var(--muted); }
 .items { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
