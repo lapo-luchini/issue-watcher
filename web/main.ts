@@ -1,9 +1,9 @@
 // The watcher's single page: important items first, then everything else, most recent signal first.
-import { api, setRegister, type Filters, type ItemView, type Status, type SubscriptionStatus } from "./api.ts";
+import { api, ServerError, setRegister, type Filters, type ItemView, type Status, type SubscriptionStatus } from "./api.ts";
 import { ItemRow } from "./components/ItemRow.ts";
 import { SubscriptionList } from "./components/SubscriptionList.ts";
 import { TopBar } from "./components/TopBar.ts";
-import { clock, pickRegister, totalUnseen, viewFromHash, whileCurrent } from "./view.ts";
+import { clock, listProblem, pickRegister, totalUnseen, viewFromHash, whileCurrent } from "./view.ts";
 import iconDark from "./favicon.svg";
 import iconLit from "./favicon-lit.svg";
 import { computed, createApp, defineComponent, onMounted, onUnmounted, ref, watch } from "./vue.ts";
@@ -46,6 +46,7 @@ const App = defineComponent({
     const status = ref<Status | null>(null);
     const loaded = ref(false);
     const error = ref("");
+    const errorFromServer = ref(false); // the server answered with an error (a bad register file) rather than not answering
     const message = ref("");
     let messageTimer: ReturnType<typeof setTimeout> | undefined;
     let refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -61,7 +62,11 @@ const App = defineComponent({
         items.value = answer.items;
         error.value = "";
       },
-      fail: (err) => (error.value = err.message),
+      fail: (err) => {
+        error.value = err.message;
+        errorFromServer.value = err instanceof ServerError;
+        if (errorFromServer.value) items.value = [];
+      },
       always: () => (loaded.value = true),
     });
     async function loadStatus() {
@@ -142,6 +147,7 @@ const App = defineComponent({
       }
       setRegister(name);
       items.value = [];
+      error.value = ""; // the last register's problem is not this one's
       loaded.value = false;
       load();
     }, { flush: "sync" });
@@ -181,7 +187,7 @@ const App = defineComponent({
     const filtered = computed(() => filters.value.unread || filters.value.important || filters.value.instance !== "");
     const subscriptionUnseen = computed(() => totalUnseen(subscriptions.value));
     return {
-      filters, view, registers, register, items, status, loaded, error, message, important, rest, unreadCount, filtered, subscriptions, subsLoaded,
+      filters, view, registers, register, items, status, loaded, error, errorFromServer, listProblem, message, important, rest, unreadCount, filtered, subscriptions, subsLoaded,
       subsError, checkedAt, subscriptionUnseen, load, poll, allSeen, replace, say,
     };
   },
@@ -190,7 +196,8 @@ const App = defineComponent({
       :registers="registers" :subscription-unseen="subscriptionUnseen" @poll="poll" @all-seen="allSeen" @added="load" @message="say" />
     <SubscriptionList v-if="view === 'subscriptions'" :subscriptions="subscriptions" :loaded="subsLoaded" :error="subsError" :checked-at="checkedAt" />
     <main v-else class="list">
-      <p v-if="error" class="error">The watcher server is not answering ({{ error }}). Is <code>watcher serve</code> still running?</p>
+      <p v-if="error && errorFromServer" class="error">{{ listProblem(register, error) }}</p>
+      <p v-else-if="error" class="error">The watcher server is not answering ({{ error }}). Is <code>watcher serve</code> still running?</p>
       <template v-else-if="loaded && items.length === 0">
         <p v-if="filtered" class="empty">Nothing matches these filters.</p>
         <p v-else-if="register !== 'default'" class="empty">Nothing in the register <code>{{ register }}</code> yet. Add an item by its URL.</p>

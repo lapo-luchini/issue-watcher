@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import type { SubscriptionStatus } from "../src/core/following.ts";
 import {
-  clock, cursorText, orderSubscriptions, pickRegister, scopeText, totalUnseen, unseenText, viewFromHash, whileCurrent, withRegister,
+  clock, cursorText, listProblem, orderSubscriptions, pickRegister, scopeText, totalUnseen, unseenText, viewFromHash, whileCurrent, withRegister,
 } from "../web/view.ts";
 
 const sub = (over: Partial<SubscriptionStatus> = {}): SubscriptionStatus => ({
@@ -122,4 +122,9 @@ test("whileCurrent: two asks out of order, only the one for the current key land
 test("clock is a 24-hour time", () => {
   expect(clock(new Date(2026, 10, 4, 14, 5))).toBe("14:05");
   expect(clock(new Date(2026, 10, 4, 0, 9))).toBe("00:09");
+});
+
+test("a list the server answered with an error names what could not be read, and never says the server is down", () => {
+  expect(listProblem("default", "boom")).toBe("The watcher could not list the items: boom");
+  expect(listProblem("houston", "boom")).toBe("The watcher could not list the register houston: boom");
 });

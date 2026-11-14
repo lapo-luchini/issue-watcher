@@ -19,6 +19,10 @@ export function pickRegister(saved: string | null, registers: string[]): string 
   return registers.length === 0 || registers.includes(saved) ? saved : DEFAULT_REGISTER;
 }
 
+/** The server answered, with an error: say what could not be read (a register that does not parse is not a server that is down). */
+export const listProblem = (register: string, message: string): string =>
+  `The watcher could not list ${register === DEFAULT_REGISTER ? "the items" : `the register ${register}`}: ${message}`;
+
 export const viewFromHash = (hash: string): View => (hash === "#subscriptions" ? "subscriptions" : "items");
 
 export function scopeText(s: Pick<SubscriptionStatus, "scope" | "exclude">): string {

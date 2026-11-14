@@ -1,6 +1,6 @@
 // The page's API client: which register every call is about.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { api, setRegister, type Filters } from "../web/api.ts";
+import { api, ServerError, setRegister, type Filters } from "../web/api.ts";
 
 const NONE: Filters = { unread: false, important: false, muted: false, instance: "" };
 let calls: { method: string; path: string }[];
@@ -59,4 +59,14 @@ test("registers, the subscription status, 'all seen', poll and status are not ab
 test("a failed call throws the server's own words", async () => {
   globalThis.fetch = (async () => Response.json({ error: "no such register: x" }, { status: 404 })) as unknown as typeof fetch;
   await expect(api.registers()).rejects.toThrow("no such register: x");
+});
+
+test("an answer with an error is a ServerError (the server is there), a lost connection is not", async () => {
+  globalThis.fetch = (async () => Response.json({ error: "registers/torn.yaml: not valid YAML at line 1" }, { status: 500 })) as unknown as typeof fetch;
+  const refused = await api.items(NONE).catch((e) => e);
+  expect(refused).toBeInstanceOf(ServerError);
+  expect(refused.message).toBe("registers/torn.yaml: not valid YAML at line 1");
+  globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as unknown as typeof fetch;
+  const lost = await api.items(NONE).catch((e) => e);
+  expect(lost).not.toBeInstanceOf(ServerError);
 });

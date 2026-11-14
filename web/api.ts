@@ -19,6 +19,9 @@ export interface Filters {
   instance: string; // "" for every instance
 }
 
+/** The server answered, with an error (as opposed to a lost connection, which fetch throws as a TypeError). */
+export class ServerError extends Error {}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const write = method !== "GET";
   const res = await fetch(path, {
@@ -28,7 +31,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     body: write ? JSON.stringify(body ?? {}) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  if (!res.ok) throw new ServerError(data.error ?? `HTTP ${res.status}`);
   return data as T;
 }
 
