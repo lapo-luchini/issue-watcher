@@ -7,7 +7,7 @@ import {
 import type { Context } from "./context.ts";
 import type { CommitResult } from "./intent.ts";
 import { DEFAULT_REGISTER, RegisterError } from "./registers.ts";
-import { checkSubscriptionName, editSubscriptions, SUBSCRIPTIONS_FILE, SubscriptionError, type Subscription } from "./subscriptions.ts";
+import { checkSubscriptionName, checkSubscriptionsFile, editSubscriptions, SUBSCRIPTIONS_FILE, SubscriptionError, type Subscription } from "./subscriptions.ts";
 
 export interface SubscriptionUpdates {
   subscription: string;
@@ -85,9 +85,9 @@ export async function defineSubscription(ctx: Context, name: string, opts: { reg
   const existing = (await ctx.subscriptions()).get(name);
   const register = opts.register ?? existing?.register ?? DEFAULT_REGISTER;
   if (!ctx.registers().includes(register)) throw new RegisterError(`no such register: ${register}`);
+  ctx.store.startCursor(name); // before the file: what is stored while it is written is news
   const r = await serialized(() => rewriteFile(ctx.where, SUBSCRIPTIONS_FILE,
-    (t) => editSubscriptions(t, { kind: "define", name, register, all: opts.all }, ctx.canonical), `watcher: subscribe ${name}`));
-  ctx.store.startCursor(name);
+    (t) => editSubscriptions(t, { kind: "define", name, register, all: opts.all }, ctx.canonical), `watcher: subscribe ${name}`, () => checkSubscriptionsFile(ctx.where.home)));
   return { subscription: name, warning: warningOf(r) };
 }
 
@@ -98,8 +98,10 @@ export async function defineSubscription(ctx: Context, name: string, opts: { reg
  */
 export async function trackItem(ctx: Context, name: string, url: string): Promise<FollowResult & { added: boolean }> {
   checkSubscriptionName(name);
-  const register = (await ctx.subscriptions()).get(name)?.register ?? DEFAULT_REGISTER;
+  const before = (await ctx.subscriptions()).get(name);
+  const register = before?.register ?? DEFAULT_REGISTER;
   const canonical = ctx.canonical(url.trim());
+  const alreadyFollowed = before !== undefined && (before.scope === "all" || before.scope.includes(canonical));
   const listed = async () => (ctx.registers().includes(register) ? await ctx.intent(register) : new Map()).has(canonical);
   let added = false;
   if (!(await listed())) {
@@ -113,9 +115,10 @@ export async function trackItem(ctx: Context, name: string, url: string): Promis
     }
   }
   ctx.store.startCursor(name);
-  ctx.store.setFloor(name, canonical); // before the file: a write that fails leaves a floor nobody reads
+  // Before the file (a write that fails leaves a floor on an item not followed). Not for an item already followed: its news so far stays news.
+  if (!alreadyFollowed) ctx.store.setFloor(name, canonical);
   const r = await serialized(() => rewriteFile(ctx.where, SUBSCRIPTIONS_FILE,
-    (t) => editSubscriptions(t, { kind: "follow", name, url: canonical, register }, ctx.canonical), `watcher: follow ${itemLabel(canonical)} in ${name}`));
+    (t) => editSubscriptions(t, { kind: "follow", name, url: canonical, register }, ctx.canonical), `watcher: follow ${itemLabel(canonical)} in ${name}`, () => checkSubscriptionsFile(ctx.where.home)));
   return { subscription: name, url: canonical, item: await itemIn(ctx, register, canonical), added, warning: warningOf(r) };
 }
 
@@ -124,7 +127,7 @@ export async function untrackItem(ctx: Context, name: string, url: string): Prom
   const sub = await need(ctx, name);
   const canonical = ctx.canonical(url.trim());
   const r = await serialized(() => rewriteFile(ctx.where, SUBSCRIPTIONS_FILE,
-    (t) => editSubscriptions(t, { kind: "unfollow", name, url: canonical }, ctx.canonical), `watcher: unfollow ${itemLabel(canonical)} in ${name}`));
+    (t) => editSubscriptions(t, { kind: "unfollow", name, url: canonical }, ctx.canonical), `watcher: unfollow ${itemLabel(canonical)} in ${name}`, () => checkSubscriptionsFile(ctx.where.home)));
   ctx.store.dropFloor(name, canonical);
   return { subscription: name, url: canonical, item: await itemIn(ctx, sub.register, canonical), warning: warningOf(r) };
 }

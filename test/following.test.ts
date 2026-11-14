@@ -254,3 +254,20 @@ test("floors belong to an explicit scope: made all, the subscription is given th
   ctx.store.db.query("UPDATE subscription_cursors SET seq = 0 WHERE name = 'p'").run();
   expect(keys(await subscriptionUpdates(ctx, "p"))).toEqual(["a-before"]);
 });
+
+test("track again on an item already followed keeps its news: the floor does not move up", async () => {
+  await define("p", "default", false);
+  await trackItem(ctx, "p", A);
+  store([A, "a1"]);
+  expect(keys(await subscriptionUpdates(ctx, "p"))).toEqual(["a1"]);
+  await trackItem(ctx, "p", A); // each project re-tracks what it follows, routinely
+  expect(keys(await subscriptionUpdates(ctx, "p"))).toEqual(["a1"]);
+});
+
+test("a subscriptions file that is not a mapping is refused and left as it is, by every change", async () => {
+  writeFileSync(join(home, "data/subscriptions.yaml"), "- name: p\n  scope: all\n");
+  for (const change of [() => defineSubscription(ctx, "p", { all: true }), () => trackItem(ctx, "p", A), () => untrackItem(ctx, "p", A)]) {
+    expect((await change().catch((e) => e)).message).toContain("must be a mapping");
+  }
+  expect(file("data/subscriptions.yaml")).toBe("- name: p\n  scope: all\n");
+});

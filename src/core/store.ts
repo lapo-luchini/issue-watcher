@@ -182,7 +182,9 @@ export class Store {
     this.addColumnIfMissing("items", "updated_at", "TEXT");
     this.addColumnIfMissing("events", "approx_at", "TEXT");
     // The sequence number of detection (see insertEvent). Caches from before it: numbered in detection order.
-    if (this.addColumnIfMissing("events", "seq", "INTEGER")) {
+    // Numbered on every open while a row has none, so a crash between the two steps is mended by the next open.
+    this.addColumnIfMissing("events", "seq", "INTEGER");
+    if (this.db.query("SELECT 1 FROM events WHERE seq IS NULL LIMIT 1").get()) {
       this.db.exec(`UPDATE events SET seq = o.n FROM
         (SELECT rowid AS r, ROW_NUMBER() OVER (ORDER BY detected_at, rowid) AS n FROM events) AS o WHERE events.rowid = o.r`);
     }
@@ -259,10 +261,11 @@ export class Store {
    */
   insertEvent(e: EventRow): boolean {
     const res = this.db.query(`
-      INSERT OR IGNORE INTO events (item_url, event_key, kind, actor, actor_role, at, detected_at,
+      INSERT INTO events (item_url, event_key, kind, actor, actor_role, at, detected_at,
         excerpt, details_json, is_signal, reason, is_baseline, approx_at, seq)
       VALUES ($itemUrl, $key, $kind, $actor, $actorRole, $at, $detectedAt, $excerpt, $details,
-        $isSignal, $reason, $isBaseline, $approxAt, (SELECT COALESCE(MAX(seq), 0) + 1 FROM events))`)
+        $isSignal, $reason, $isBaseline, $approxAt, (SELECT COALESCE(MAX(seq), 0) + 1 FROM events))
+      ON CONFLICT (item_url, event_key) DO NOTHING`)
       .run({
         ...e,
         details: e.details ? JSON.stringify(e.details) : null,

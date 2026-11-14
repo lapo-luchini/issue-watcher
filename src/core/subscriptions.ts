@@ -1,6 +1,8 @@
 // data/subscriptions.yaml: who follows what. A subscription has a name, a register, a scope (all
 // of the register's entries, or a list of item URLs) and URLs it excludes. Its cursor is state, and
 // lives in the cache (see Store.subscriptionCursor), never in git.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isMap, isScalar, isSeq, parse, parseDocument, type Document, type YAMLMap, type YAMLSeq } from "yaml";
 import { DEFAULT_REGISTER, isValidName } from "./registers.ts";
 
@@ -41,6 +43,7 @@ function urlList(raw: unknown, where: string, field: string): string[] {
 /** `file` names the file in error messages. */
 export function parseSubscriptions(text: string, file = "subscriptions.yaml"): Map<string, Subscription> {
   const raw: any = parse(text) ?? {};
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${file}: must be a mapping with a 'subscriptions' list`);
   const list = raw.subscriptions ?? [];
   if (!Array.isArray(list)) throw new Error(`${file}: 'subscriptions' must be a list`);
   const out = new Map<string, Subscription>();
@@ -65,6 +68,18 @@ export function parseSubscriptions(text: string, file = "subscriptions.yaml"): M
 export async function loadSubscriptions(path: string, name = "subscriptions.yaml"): Promise<Map<string, Subscription>> {
   const file = Bun.file(path);
   return (await file.exists()) ? parseSubscriptions(await file.text(), name) : new Map();
+}
+
+/** Run under the lock before a change: a file that does not parse is left as it is, never overwritten by the edit. */
+export function checkSubscriptionsFile(home: string): void {
+  let text: string;
+  try {
+    text = readFileSync(join(home, SUBSCRIPTIONS_FILE), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // not there yet: the write creates it
+    throw err;
+  }
+  parseSubscriptions(text);
 }
 
 /** A change to subscriptions.yaml. `define` makes or updates a subscription; `follow` and `unfollow` change what it follows. */

@@ -62,3 +62,19 @@ test("a cache from before the numbers gets them in detection order, and the rest
   expect(new Store(path).maxSeq()).toBe(3); // opening again changes nothing
   s.close();
 });
+
+test("a cache whose seq column was added but not filled (a crash in between) is numbered by the next open", () => {
+  const dir = tmpDir("seq");
+  const path = join(dir, "cache.sqlite");
+  new Store(path).close(); // the current schema
+  const db = new Database(path);
+  db.exec("DROP INDEX events_seq");
+  const put = db.query(`INSERT INTO events (item_url, event_key, kind, actor, actor_role, at, detected_at, is_signal, reason, seq)
+    VALUES ($u, $k, 'comment', 'm', 'maintainer', '2026-11-01T00:00:00.000Z', $d, 1, 'signal:comment', NULL)`);
+  put.run({ u: U, k: "late", d: "2026-11-03T00:00:00.000Z" });
+  put.run({ u: U, k: "early", d: "2026-11-02T00:00:00.000Z" });
+  db.close();
+  const s = new Store(path);
+  expect(s.signalEventsBetween(0, s.maxSeq()).map((e) => e.key)).toEqual(["late", "early"]);
+  s.close();
+});
