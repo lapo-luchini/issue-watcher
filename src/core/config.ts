@@ -37,6 +37,8 @@ export interface Config {
   commitBranch: string;
   // MCP server: true (the default) lists and accepts only the tools that read; see `mcp.read_only`.
   mcpReadOnly: boolean;
+  // A program (and its arguments) run after every poll that saves, see core/hook.ts; absent: none.
+  afterPoll?: string[];
 }
 
 export const DEFAULT_FILTER: FilterConfig = {
@@ -136,7 +138,9 @@ export function parseConfig(text: string, env: Record<string, string | undefined
   if (typeof mcp !== "object" || Array.isArray(mcp)) throw new Error("config: 'mcp' must be a mapping");
   // Read-only unless explicitly turned off: only a real boolean `false` allows the write tools.
   if (mcp.read_only !== undefined && typeof mcp.read_only !== "boolean") throw new Error("config: mcp: 'read_only' must be true or false");
-  return { instances, filter, commitBranch, mcpReadOnly: mcp.read_only ?? true };
+  const afterPoll = stringList(raw.after_poll, "config", "after_poll");
+  if (afterPoll?.length === 0) throw new Error("config: 'after_poll' must be a list of strings");
+  return { instances, filter, commitBranch, mcpReadOnly: mcp.read_only ?? true, ...(afterPoll ? { afterPoll } : {}) };
 }
 
 export async function loadConfig(path: string, env: Record<string, string | undefined> = process.env): Promise<Config> {

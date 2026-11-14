@@ -10,6 +10,7 @@ import { openContext } from "./core/context.ts";
 import { acknowledge, defineSubscription, subscriptionUpdates, trackItem, untrackItem } from "./core/following.ts";
 import type { Intent, IntentChange } from "./core/intent.ts";
 import type { Adapter } from "./core/model.ts";
+import { runAfterPoll } from "./core/hook.ts";
 import { pollAll, type InstanceResult } from "./core/poller.ts";
 import { checkRegisterName, DEFAULT_REGISTER, RegisterError } from "./core/registers.ts";
 import { SubscriptionError } from "./core/subscriptions.ts";
@@ -157,6 +158,8 @@ export async function startServer(opts: ServerOptions) {
     polling = (async () => {
       try {
         report.results = await pollAll({ store, config, intent: await ctx.allIntent(), adapterFor: opts.adapterFor ?? createAdapter, now });
+        const hook = await runAfterPoll(config.afterPoll, ctx.home);
+        if (hook) console.error(`watcher: warning: ${hook}`);
       } catch (err) {
         report.error = (err as Error).message;
       } finally {

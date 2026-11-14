@@ -9,6 +9,7 @@ import { listItems, markSeen } from "./core/api.ts";
 import { loadConfig } from "./core/config.ts";
 import { openContext } from "./core/context.ts";
 import { loadIntent, type Intent } from "./core/intent.ts";
+import { runAfterPoll } from "./core/hook.ts";
 import { pollAll, refilter } from "./core/poller.ts";
 import { DEFAULT_REGISTER, listRegisterNames, mergeIntents, registerFile, registerFromEnv, registerLabel } from "./core/registers.ts";
 import { Store } from "./core/store.ts";
@@ -128,6 +129,10 @@ async function main(argv: string[]): Promise<number> {
             : `${r.instance}: ERROR ${r.error} (${r.fetched} fetched, ${r.newSignals} new signal(s))`);
         }
         if (dryRun) console.log("(dry run: nothing was saved)");
+        else {
+          const hook = await runAfterPoll(config.afterPoll, home);
+          if (hook) console.error(`watcher: warning: ${hook}`);
+        }
         return results.every((r) => r.ok) ? 0 : 1;
       }
       case "list": {

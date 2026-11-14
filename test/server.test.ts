@@ -1,6 +1,6 @@
 // The HTTP API against a temporary watcher home (a git repo) and a fake forge.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
 import type { Adapter, ItemRef, Snapshot } from "../src/core/model.ts";
@@ -296,4 +296,18 @@ test("a subscriptions.yaml that does not parse is in /api/status problems, and t
   expect(status.problems).toHaveLength(1);
   expect(JSON.stringify(status.problems)).toContain("subscriptions.yaml");
   expect((await api("/api/items")).status).toBe(200);
+});
+
+test("a poll started from the web runs the after_poll hook once", async () => {
+  const dir = tmpDir("srv-hook");
+  const ran = join(dir, "ran");
+  const sh = join(dir, "h.sh");
+  writeFileSync(sh, `#!/bin/sh\necho x >> ${ran}\n`);
+  chmodSync(sh, 0o755);
+  await srv.stop();
+  writeFileSync(join(home, "data/config.yaml"), `instances:\n  - {id: github, type: github, url: https://api.github.com, user: lapo}\nafter_poll: [${sh}]\n`);
+  srv = await startServer({ home, port: 0, adapterFor: () => adapter, now: () => new Date("2026-11-04T12:00:00.000Z") });
+  expect((await send("POST", "/api/poll", {})).status).toBe(202);
+  await srv.idle();
+  expect(readFileSync(ran, "utf8")).toBe("x\n");
 });

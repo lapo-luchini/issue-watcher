@@ -10,6 +10,7 @@ import type { InstanceConfig } from "../core/config.ts";
 import type { Context } from "../core/context.ts";
 import { acknowledge, defineSubscription, subscriptionUpdates, trackItem, untrackItem } from "../core/following.ts";
 import type { Adapter } from "../core/model.ts";
+import { runAfterPoll } from "../core/hook.ts";
 import { pollAll, type InstanceResult } from "../core/poller.ts";
 import { checkRegisterName, DEFAULT_REGISTER, RegisterError, registerLabel } from "../core/registers.ts";
 import { SubscriptionError } from "../core/subscriptions.ts";
@@ -166,6 +167,8 @@ export function createTools(ctx: Context, opts: ToolsOptions = {}): WatcherTools
       try {
         // No `log`: stdout belongs to the protocol.
         report.results = await pollAll({ store, config: ctx.config, intent: await ctx.allIntent(), adapterFor: opts.adapterFor ?? createAdapter, now });
+        const hook = await runAfterPoll(ctx.config.afterPoll, ctx.home);
+        if (hook) console.error(`watcher: warning: ${hook}`); // stderr: stdout is the protocol
       } catch (err) {
         report.error = (err as Error).message;
       } finally {

@@ -542,3 +542,14 @@ test("the whole tool list stays under 1,000 tokens, write tools included (a toke
   await open("mcp:\n  read_only: false\n");
   expect(JSON.stringify(tools.list()).length / 4).toBeLessThan(1000);
 });
+
+test("poll runs the after_poll hook once the poll is done, with nothing on our stdout", async () => {
+  const ran = join(tmpDir("mcp-hook"), "ran");
+  const sh = join(tmpDir("mcp-hook"), "h.sh");
+  writeFileSync(sh, `#!/bin/sh\necho x >> ${ran}\n`);
+  chmodSync(sh, 0o755);
+  await open(`mcp:\n  read_only: false\nafter_poll: [${sh}]\n`);
+  await call("poll");
+  await tools.idle();
+  expect(readFileSync(ran, "utf8")).toBe("x\n");
+});
