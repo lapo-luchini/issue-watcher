@@ -33,7 +33,7 @@ export function cursorText(s: Pick<SubscriptionStatus, "cursor" | "latest">): st
 
 export function unseenText(s: Pick<SubscriptionStatus, "unseen" | "error">): string {
   if (s.error) return `Cannot tell: ${s.error}`;
-  return s.unseen ? `${plural(s.unseen, "unseen update", "unseen updates")}` : "Up to date";
+  return s.unseen ? plural(s.unseen, "unseen update", "unseen updates") : "Up to date";
 }
 
 /** Those with the most unseen updates first; the others keep their order. */
