@@ -9,7 +9,7 @@ import { Store } from "../src/core/store.ts";
 const PR = "https://github.com/foo/bar/pull/42";
 const ISSUE = "https://github.com/foo/bar/issues/7";
 const inst: InstanceConfig = { id: "github", type: "github", url: "https://api.github.com", user: "lapo", emails: [] };
-const config: Config = { instances: [inst], filter: DEFAULT_FILTER, commitBranch: "config" };
+const config: Config = { instances: [inst], filter: DEFAULT_FILTER, commitBranch: "config", mcpReadOnly: true };
 
 const T0 = new Date("2026-11-04T10:00:00.000Z");
 const minutes = (n: number) => new Date(T0.getTime() + n * 60_000);

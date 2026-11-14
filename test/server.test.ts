@@ -1,8 +1,8 @@
 // The HTTP API against a temporary watcher home (a git repo) and a fake forge.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmp, tmpDir } from "./tmp.ts";
 import type { Adapter, ItemRef, Snapshot } from "../src/core/model.ts";
 import { itemId, lockHolder, Store } from "../src/core/store.ts";
 import { startServer } from "../src/server.ts";
@@ -32,7 +32,7 @@ const adapter: Adapter = {
 };
 
 beforeEach(async () => {
-  home = mkdtempSync(join(tmpdir(), "watcher-srv-"));
+  home = tmpDir("srv");
   for (const args of [["init", "-q"], ["config", "user.name", "T"], ["config", "user.email", "t@example.org"]]) {
     Bun.spawnSync(["git", "-C", home, ...args]);
   }
@@ -62,6 +62,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await srv.stop();
+  cleanupTmp();
 });
 
 const api = (path: string, init: RequestInit = {}) => fetch(new URL(path, srv.url), init);
@@ -109,6 +110,72 @@ test("POST /api/items adds a tracked or manual item", async () => {
   const dup = await send("POST", "/api/items", { url: "https://lists.example.org/p2" });
   expect(dup.status).toBe(400);
   expect((await dup.json()).error).toContain("already tracked");
+});
+
+const OTHER = "https://github.com/x/y/issues/1";
+const houston = () => join(home, "data/registers/houston.yaml");
+const addRegister = (text: string) => {
+  mkdirSync(join(home, "data/registers"), { recursive: true });
+  writeFileSync(houston(), text);
+};
+
+test("GET /api/registers lists them, default first", async () => {
+  expect(await (await api("/api/registers")).json()).toEqual({ registers: ["default"] });
+  addRegister("items:\n");
+  expect(await (await api("/api/registers")).json()).toEqual({ registers: ["default", "houston"] });
+});
+
+test("?register= picks the register to list, read, change and mark: default is the whole cache", async () => {
+  addRegister(`items:\n  - url: ${PR}\n    priority: normal\n    note: for houston\n`);
+  const urls = async (path: string) => (await (await api(path)).json()).items.map((i: { url: string }) => i.url);
+  expect(await urls("/api/items?register=houston")).toEqual([PR]);
+  expect(await urls("/api/items?register=default")).toEqual([PR, "https://lists.example.org/p1"]);
+  expect(await urls("/api/items")).toEqual([PR, "https://lists.example.org/p1"]);
+  const id = itemId(PR);
+  expect((await (await api(`/api/items/${id}?register=houston`)).json()).item).toMatchObject({ priority: "normal", note: "for houston" });
+  expect((await (await api(`/api/items/${id}`)).json()).item).toMatchObject({ priority: "important", note: null });
+  expect((await api(`/api/items/${itemId("https://lists.example.org/p1")}?register=houston`)).status).toBe(404);
+  expect((await api(`/api/items/${id}/events?register=houston`)).status).toBe(200);
+  expect((await send("POST", `/api/items/${id}/seen?register=houston`, {})).status).toBe(200);
+  const patched = await send("PATCH", `/api/items/${id}?register=houston`, { muted: true });
+  expect((await patched.json()).item).toMatchObject({ muted: true });
+  expect(readFileSync(houston(), "utf8")).toContain("muted: true");
+  expect(readFileSync(join(home, "data/items.yaml"), "utf8")).not.toContain(PR);
+  expect(Bun.spawnSync(["git", "-C", home, "log", "-1", "config", "--format=%s"]).stdout.toString()).toBe("watcher: mute foo/bar#42 (register houston)\n");
+});
+
+test("a register that does not exist is a 404 to read; a bad name is a 400 on every route", async () => {
+  expect((await api("/api/items?register=nope")).status).toBe(404);
+  expect((await (await api("/api/items?register=nope")).json()).error).toBe("no such register: nope");
+  expect((await api(`/api/items/${itemId(PR)}?register=nope`)).status).toBe(404);
+  for (const bad of ["..", "a%2Fb", ".x", "A", ""]) {
+    for (const path of ["/api/items", `/api/items/${itemId(PR)}`, `/api/items/${itemId(PR)}/events`]) {
+      const res = await api(`${path}?register=${bad}`);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain("invalid register name");
+    }
+    expect((await send("POST", `/api/items?register=${bad}`, { url: OTHER })).status).toBe(400);
+    expect((await send("PATCH", `/api/items/${itemId(PR)}?register=${bad}`, { muted: true })).status).toBe(400);
+  }
+  expect(Bun.spawnSync(["ls", join(home, "data")]).stdout.toString()).not.toContain("registers");
+});
+
+test("POST /api/items?register= adds the item to that register, creating it; the same URL can be in several", async () => {
+  const added = await send("POST", "/api/items?register=fresh", { url: PR });
+  expect(added.status).toBe(201); // PR is in the cache, but not in `fresh`
+  expect(readFileSync(join(home, "data/registers/fresh.yaml"), "utf8")).toBe(`items:\n  - url: ${PR}\n`);
+  expect((await send("POST", "/api/items?register=fresh", { url: PR })).status).toBe(400);
+  expect((await send("POST", "/api/items", { url: PR })).status).toBe(400); // default: the cache has it
+  expect((await (await api("/api/registers")).json()).registers).toEqual(["default", "fresh"]);
+});
+
+test("a poll fetches the entries of every register, once", async () => {
+  addRegister(`items:\n  - url: ${OTHER}\n  - url: ${ISSUE}\n`);
+  mkdirSync(join(home, "data/registers"), { recursive: true });
+  writeFileSync(join(home, "data/registers/second.yaml"), `items:\n  - url: ${OTHER}\n`); // default has neither
+  await send("POST", "/api/poll", {});
+  await srv.idle();
+  expect(fetched.sort()).toEqual([ISSUE, OTHER].sort()); // OTHER is in both, ISSUE in a register and found by discovery
 });
 
 test("POST seen for one item and for all", async () => {
@@ -182,4 +249,65 @@ test("GET / serves the web UI", async () => {
   const html = await res.text();
   expect(html).toContain('<div id="app"></div>');
   expect(html).toMatch(/<link rel="icon" type="image\/svg\+xml" href="[^"]*favicon[^"]*\.svg"/);
+});
+
+test("subscriptions over HTTP: create, updates (never moving the cursor), ack, track, untrack, list", async () => {
+  expect(await (await api("/api/subscriptions")).json()).toEqual({ subscriptions: [] });
+  const made = await send("PUT", "/api/subscriptions/proj", { all: true });
+  expect(made.status).toBe(200);
+  expect(await made.json()).toMatchObject({ subscription: "proj" });
+  const store = new Store(join(home, "var/cache.sqlite"));
+  store.insertEvent({
+    itemUrl: PR, key: "c:10", kind: "comment", actor: "maint", actorRole: "maintainer", at: "2026-11-04T11:00:00.000Z",
+    detectedAt: "2026-11-04T11:01:00.000Z", excerpt: "ping", details: null, isSignal: true, reason: "signal:comment", isBaseline: false,
+  });
+  store.close();
+  const read = async () => (await api("/api/subscriptions/proj/updates")).json();
+  const r = await read();
+  expect(r.token).toBe("proj.3");
+  expect(r.items.map((g: { item: { url: string }; events: { key: string }[] }) => [g.item.url, g.events.map((e) => e.key)])).toEqual([[PR, ["c:10"]]]);
+  expect(await read()).toEqual(r);
+  expect(await (await send("POST", "/api/subscriptions/proj/ack", { token: r.token })).json()).toEqual({ subscription: "proj", cursor: 3 });
+  expect((await read()).items).toEqual([]);
+  const tracked = await send("POST", "/api/subscriptions/proj/track", { url: `${PR}/files` });
+  expect(tracked.status).toBe(200);
+  expect(await tracked.json()).toMatchObject({ url: PR, added: false }); // the cache knows it already
+  expect((await (await api("/api/subscriptions")).json()).subscriptions).toMatchObject([{ name: "proj", register: "default" }]);
+  expect(await (await send("POST", "/api/subscriptions/proj/untrack", { url: PR })).json()).toMatchObject({ url: PR });
+});
+
+test("subscription errors: a missing one is 404, a bad name, token or body 400, never a path", async () => {
+  expect((await api("/api/subscriptions/nobody/updates")).status).toBe(404);
+  expect((await send("PUT", "/api/subscriptions/Bad_Name!", {})).status).toBe(400);
+  expect((await send("PUT", "/api/subscriptions/proj", { register: "nope" })).status).toBe(404);
+  expect((await send("PUT", "/api/subscriptions/proj", { all: "yes" })).status).toBe(400);
+  await send("PUT", "/api/subscriptions/proj", {});
+  expect((await send("POST", "/api/subscriptions/proj/ack", {})).status).toBe(400);
+  const bad = await send("POST", "/api/subscriptions/proj/ack", { token: "other.1" });
+  expect(bad.status).toBe(400);
+  expect((await bad.json()).error).toContain("not from proj's updates");
+  expect((await send("POST", "/api/subscriptions/proj/track", { url: 3 })).status).toBe(400);
+  expect((await send("POST", "/api/subscriptions/proj/track", { url: "nonsense" })).status).toBe(400);
+});
+
+test("a subscriptions.yaml that does not parse is in /api/status problems, and the other endpoints still work", async () => {
+  writeFileSync(join(home, "data/subscriptions.yaml"), "subscriptions:\n  - name: p\n    scope: some\n");
+  const status = await (await api("/api/status")).json();
+  expect(status.problems).toHaveLength(1);
+  expect(JSON.stringify(status.problems)).toContain("subscriptions.yaml");
+  expect((await api("/api/items")).status).toBe(200);
+});
+
+test("a poll started from the web runs the after_poll hook once", async () => {
+  const dir = tmpDir("srv-hook");
+  const ran = join(dir, "ran");
+  const sh = join(dir, "h.sh");
+  writeFileSync(sh, `#!/bin/sh\necho x >> ${ran}\n`);
+  chmodSync(sh, 0o755);
+  await srv.stop();
+  writeFileSync(join(home, "data/config.yaml"), `instances:\n  - {id: github, type: github, url: https://api.github.com, user: lapo}\nafter_poll: [${sh}]\n`);
+  srv = await startServer({ home, port: 0, adapterFor: () => adapter, now: () => new Date("2026-11-04T12:00:00.000Z") });
+  expect((await send("POST", "/api/poll", {})).status).toBe(202);
+  await srv.idle();
+  expect(readFileSync(ran, "utf8")).toBe("x\n");
 });
