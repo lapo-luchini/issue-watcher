@@ -30,15 +30,15 @@ export function scopeText(s: Pick<SubscriptionStatus, "scope" | "exclude">): str
   return s.scope.length ? plural(s.scope.length, "item", "items") : "No item followed yet";
 }
 
-export function cursorText(s: Pick<SubscriptionStatus, "cursor" | "latest">): string {
+/** Only a subscription without a cursor needs saying: otherwise the cursor and the newest number say nothing about this subscription. */
+export function cursorText(s: Pick<SubscriptionStatus, "cursor">): string {
   if (s.cursor === null) return "No cursor yet: it starts at the first read";
-  const behind = Math.max(0, s.latest - s.cursor);
-  return behind ? plural(behind, "update behind", "updates behind") : "Not behind";
+  return "";
 }
 
 export function unseenText(s: Pick<SubscriptionStatus, "unseen" | "error">): string {
   if (s.error) return `Cannot tell: ${s.error}`;
-  return s.unseen ? plural(s.unseen, "unseen update", "unseen updates") : "Up to date";
+  return s.unseen ? plural(s.unseen, "update behind", "updates behind") : "Up to date";
 }
 
 /** Those that cannot be told first, then those with the most unseen updates; the others keep their order. */

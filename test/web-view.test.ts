@@ -39,17 +39,15 @@ test("scopeText says what a subscription follows", () => {
   expect(scopeText(sub({ scope: ["a", "b", "c"] }))).toBe("3 items");
 });
 
-test("cursorText gives the number read up to against the newest, or says there is no cursor yet", () => {
-  expect(cursorText(sub({ cursor: 2, latest: 4 }))).toBe("2 updates behind");
-  expect(cursorText(sub({ cursor: 3, latest: 4 }))).toBe("1 update behind");
-  expect(cursorText(sub({ cursor: 1234, latest: 1234 }))).toBe("Not behind");
+test("cursorText says there is no cursor yet, and nothing once there is one (the newest number is not about this subscription)", () => {
+  expect(cursorText(sub({ cursor: 2, latest: 4 }))).toBe("");
   expect(cursorText(sub({ cursor: null }))).toBe("No cursor yet: it starts at the first read");
 });
 
 test("unseenText: a state in words, never only a colour", () => {
   expect(unseenText(sub())).toBe("Up to date");
-  expect(unseenText(sub({ unseen: 1 }))).toBe("1 unseen update");
-  expect(unseenText(sub({ unseen: 1500 }))).toBe("1,500 unseen updates");
+  expect(unseenText(sub({ unseen: 1 }))).toBe("1 update behind");
+  expect(unseenText(sub({ unseen: 1500 }))).toBe("1,500 updates behind");
   expect(unseenText(sub({ error: "no such register: x" }))).toBe("Cannot tell: no such register: x");
 });
 

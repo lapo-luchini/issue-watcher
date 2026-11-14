@@ -34,7 +34,7 @@ export const SubscriptionList = defineComponent({
             <p class="sub__meta">
               <span>Register <code>{{ s.register }}</code></span>
               <span>{{ scopeText(s) }}</span>
-              <span>{{ cursorText(s) }}</span>
+              <span v-if="cursorText(s)">{{ cursorText(s) }}</span>
             </p>
             <ul v-if="s.items.length" class="sub__news">
               <li v-for="i in s.items" :key="i.url">

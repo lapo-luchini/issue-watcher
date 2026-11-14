@@ -65,13 +65,13 @@ test("the subscription view has no item filters, register switcher, adding or ma
   expect(html).toContain("Poll now");
 });
 
-test("a subscription shows its name, register, scope, cursor and that it is up to date", async () => {
+test("a subscription shows its name, register, scope and that it is up to date", async () => {
   const html = await list({ subscriptions: [sub()], checkedAt: "14:05" });
   expect(html).toContain(">proj</h2>");
   expect(html).toContain("default");
   expect(html).toContain("Every item of the register");
-  expect(html).toContain("2 updates behind");
   expect(html).not.toContain("Read up to");
+  expect(html).not.toContain("behind");
   expect(html).toContain("Up to date");
   expect(html).toContain("Checked 14:05");
 });
@@ -79,7 +79,7 @@ test("a subscription shows its name, register, scope, cursor and that it is up t
 test("unseen updates are counted and named by item, with a link only for web URLs", async () => {
   const items = [{ url: PR, id: itemId(PR), title: "Fix build", count: 2 }, { url: "mailto:x@example.org", id: "m1", title: "A list post", count: 1 }];
   const html = await list({ subscriptions: [sub({ unseen: 3, items })] });
-  expect(html).toContain("3 unseen updates");
+  expect(html).toContain("3 updates behind");
   expect(html).toContain(`href="${PR}"`);
   expect(html).toContain("Fix build");
   expect(html).toContain("A list post");
