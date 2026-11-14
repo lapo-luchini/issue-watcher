@@ -90,3 +90,15 @@ test("errors name the file they come from: items.yaml by default, the register's
   const twice = parseIntent("items:\n  - url: https://forge.example/o/r/1/\n  - url: https://forge.example/o/r/1");
   expect(() => canonicalizeIntent(twice, fakeRefFromUrl, "registers/foo.yaml")).toThrow("registers/foo.yaml: duplicate url");
 });
+
+test("a file that does not parse is one line naming the file and the line, not the parser's excerpt of the file", () => {
+  let message = "";
+  try {
+    parseIntent("items: [unclosed\n  - : :\n", "registers/houston.yaml");
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toStartWith("registers/houston.yaml: not valid YAML at line 1");
+  expect(message).not.toContain("\n");
+  expect(message).not.toContain("unclosed");
+});

@@ -17,9 +17,23 @@ export interface IntentEntry {
 
 export type Intent = Map<string, IntentEntry>;
 
+/**
+ * `parse` for a data file whose error reaches a page or a tool: one line naming the file and the line.
+ * The parser's own message goes on with an excerpt of the file and a caret, over several lines.
+ */
+export function parseYaml(text: string, file: string): unknown {
+  try {
+    return parse(text);
+  } catch (err) {
+    const e = err as { message?: string; linePos?: { line: number }[] };
+    const what = String(e.message ?? "").split(/ at line \d+/)[0]!.trim();
+    throw new Error(`${file}: not valid YAML${e.linePos?.[0] ? ` at line ${e.linePos[0].line}` : ""}${what ? `: ${what}` : ""}`);
+  }
+}
+
 /** `file` names the register in error messages. */
 export function parseIntent(text: string, file = "items.yaml"): Intent {
-  const raw: any = parse(text) ?? {};
+  const raw: any = parseYaml(text, file) ?? {};
   const list = raw.items ?? [];
   if (!Array.isArray(list)) throw new Error(`${file}: 'items' must be a list`);
   const out: Intent = new Map();

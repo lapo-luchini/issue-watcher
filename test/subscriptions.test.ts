@@ -82,3 +82,14 @@ test("unfollow removes the URL from an explicit scope, or excludes it from `all`
   expect(editSubscriptions(t2, { kind: "unfollow", name: "h", url: A }, strip)).toBe(t2); // once
   expect(() => editSubscriptions(t2, { kind: "unfollow", name: "nope", url: A }, strip)).toThrow("no such subscription: nope");
 });
+
+test("a subscriptions file that does not parse is one line naming the file and the line", () => {
+  let message = "";
+  try {
+    parseSubscriptions("subscriptions: [unclosed\n  - : :\n");
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toStartWith("subscriptions.yaml: not valid YAML at line 1");
+  expect(message).not.toContain("\n");
+});

@@ -3,7 +3,8 @@
 // lives in the cache (see Store.subscriptionCursor), never in git.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isMap, isScalar, isSeq, parse, parseDocument, type Document, type YAMLMap, type YAMLSeq } from "yaml";
+import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap, type YAMLSeq } from "yaml";
+import { parseYaml } from "./intent.ts";
 import { DEFAULT_REGISTER, isValidName } from "./registers.ts";
 
 export const SUBSCRIPTIONS_FILE = "data/subscriptions.yaml";
@@ -42,7 +43,7 @@ function urlList(raw: unknown, where: string, field: string): string[] {
 
 /** `file` names the file in error messages. */
 export function parseSubscriptions(text: string, file = "subscriptions.yaml"): Map<string, Subscription> {
-  const raw: any = parse(text) ?? {};
+  const raw: any = parseYaml(text, file) ?? {};
   if (typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${file}: must be a mapping with a 'subscriptions' list`);
   const list = raw.subscriptions ?? [];
   if (!Array.isArray(list)) throw new Error(`${file}: 'subscriptions' must be a list`);
