@@ -250,3 +250,50 @@ test("GET / serves the web UI", async () => {
   expect(html).toContain('<div id="app"></div>');
   expect(html).toMatch(/<link rel="icon" type="image\/svg\+xml" href="[^"]*favicon[^"]*\.svg"/);
 });
+
+test("subscriptions over HTTP: create, updates (never moving the cursor), ack, track, untrack, list", async () => {
+  expect(await (await api("/api/subscriptions")).json()).toEqual({ subscriptions: [] });
+  const made = await send("PUT", "/api/subscriptions/proj", { all: true });
+  expect(made.status).toBe(200);
+  expect(await made.json()).toMatchObject({ subscription: "proj" });
+  const store = new Store(join(home, "var/cache.sqlite"));
+  store.insertEvent({
+    itemUrl: PR, key: "c:10", kind: "comment", actor: "maint", actorRole: "maintainer", at: "2026-11-04T11:00:00.000Z",
+    detectedAt: "2026-11-04T11:01:00.000Z", excerpt: "ping", details: null, isSignal: true, reason: "signal:comment", isBaseline: false,
+  });
+  store.close();
+  const read = async () => (await api("/api/subscriptions/proj/updates")).json();
+  const r = await read();
+  expect(r.token).toBe("proj.3");
+  expect(r.items.map((g: { item: { url: string }; events: { key: string }[] }) => [g.item.url, g.events.map((e) => e.key)])).toEqual([[PR, ["c:10"]]]);
+  expect(await read()).toEqual(r);
+  expect(await (await send("POST", "/api/subscriptions/proj/ack", { token: r.token })).json()).toEqual({ subscription: "proj", cursor: 3 });
+  expect((await read()).items).toEqual([]);
+  const tracked = await send("POST", "/api/subscriptions/proj/track", { url: `${PR}/files` });
+  expect(tracked.status).toBe(200);
+  expect(await tracked.json()).toMatchObject({ url: PR, added: false }); // the cache knows it already
+  expect((await (await api("/api/subscriptions")).json()).subscriptions).toMatchObject([{ name: "proj", register: "default" }]);
+  expect(await (await send("POST", "/api/subscriptions/proj/untrack", { url: PR })).json()).toMatchObject({ url: PR });
+});
+
+test("subscription errors: a missing one is 404, a bad name, token or body 400, never a path", async () => {
+  expect((await api("/api/subscriptions/nobody/updates")).status).toBe(404);
+  expect((await send("PUT", "/api/subscriptions/Bad_Name!", {})).status).toBe(400);
+  expect((await send("PUT", "/api/subscriptions/proj", { register: "nope" })).status).toBe(404);
+  expect((await send("PUT", "/api/subscriptions/proj", { all: "yes" })).status).toBe(400);
+  await send("PUT", "/api/subscriptions/proj", {});
+  expect((await send("POST", "/api/subscriptions/proj/ack", {})).status).toBe(400);
+  const bad = await send("POST", "/api/subscriptions/proj/ack", { token: "other.1" });
+  expect(bad.status).toBe(400);
+  expect((await bad.json()).error).toContain("not from proj's updates");
+  expect((await send("POST", "/api/subscriptions/proj/track", { url: 3 })).status).toBe(400);
+  expect((await send("POST", "/api/subscriptions/proj/track", { url: "nonsense" })).status).toBe(400);
+});
+
+test("a subscriptions.yaml that does not parse is in /api/status problems, and the other endpoints still work", async () => {
+  writeFileSync(join(home, "data/subscriptions.yaml"), "subscriptions:\n  - name: p\n    scope: some\n");
+  const status = await (await api("/api/status")).json();
+  expect(status.problems).toHaveLength(1);
+  expect(JSON.stringify(status.problems)).toContain("subscriptions.yaml");
+  expect((await api("/api/items")).status).toBe(200);
+});

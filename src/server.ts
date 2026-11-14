@@ -7,10 +7,12 @@ import {
 } from "./core/api.ts";
 import type { InstanceConfig } from "./core/config.ts";
 import { openContext } from "./core/context.ts";
+import { acknowledge, defineSubscription, subscriptionUpdates, trackItem, untrackItem } from "./core/following.ts";
 import type { Intent, IntentChange } from "./core/intent.ts";
 import type { Adapter } from "./core/model.ts";
 import { pollAll, type InstanceResult } from "./core/poller.ts";
 import { checkRegisterName, DEFAULT_REGISTER, RegisterError } from "./core/registers.ts";
+import { SubscriptionError } from "./core/subscriptions.ts";
 
 export interface ServerOptions {
   home: string; // the watcher's directory: data/config.yaml, data/items.yaml, var/cache.sqlite
@@ -132,6 +134,23 @@ export async function startServer(opts: ServerOptions) {
     }
   }
 
+  /**
+   * Runs a call of the subscription core. What it words itself (a bad name, token, register or URL, a file's syntax error) is told as it is:
+   * 404 for something that does not exist, else 400. A system error carries a path: logged, and said only as a failure.
+   */
+  async function following<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof SubscriptionError || err instanceof RegisterError) throw new HttpError(/^no such /.test(err.message) ? 404 : 400, err.message);
+      if (/^E[A-Z0-9]+$/.test(String((err as NodeJS.ErrnoException).code))) {
+        console.error(`watcher: ${(err as Error).message}`);
+        throw new HttpError(500, "could not read or write the subscription files");
+      }
+      throw new HttpError(400, (err as Error).message); // what the core words itself: a bad URL, a file's syntax error
+    }
+  }
+
   function startPoll(): void {
     lastPoll = { startedAt: now().toISOString(), finishedAt: null, results: null, error: null };
     const report = lastPoll;
@@ -201,6 +220,41 @@ export async function startServer(opts: ServerOptions) {
         }),
       },
       "/api/registers": { GET: route(() => json({ registers: ctx.registers() })) },
+      "/api/subscriptions": {
+        GET: route(async () => json({ subscriptions: [...(await following(() => ctx.subscriptions())).values()] })),
+      },
+      "/api/subscriptions/:name": {
+        PUT: route(async (req) => {
+          const b = await body(req);
+          if (b.register !== undefined && typeof b.register !== "string") throw new HttpError(400, "register must be text");
+          if (b.all !== undefined && typeof b.all !== "boolean") throw new HttpError(400, "all must be true or false");
+          return json(await following(() => defineSubscription(ctx, req.params.name!, { register: b.register as string | undefined, all: b.all as boolean | undefined })));
+        }),
+      },
+      "/api/subscriptions/:name/updates": {
+        GET: route(async (req) => json(await following(() => subscriptionUpdates(ctx, req.params.name!)))),
+      },
+      "/api/subscriptions/:name/ack": {
+        POST: route(async (req) => {
+          const b = await body(req);
+          if (typeof b.token !== "string") throw new HttpError(400, "token is required");
+          return json(await following(() => acknowledge(ctx, req.params.name!, b.token as string)));
+        }),
+      },
+      "/api/subscriptions/:name/track": {
+        POST: route(async (req) => {
+          const b = await body(req);
+          if (typeof b.url !== "string") throw new HttpError(400, "url is required");
+          return json(await following(() => trackItem(ctx, req.params.name!, (b.url as string).trim())));
+        }),
+      },
+      "/api/subscriptions/:name/untrack": {
+        POST: route(async (req) => {
+          const b = await body(req);
+          if (typeof b.url !== "string") throw new HttpError(400, "url is required");
+          return json(await following(() => untrackItem(ctx, req.params.name!, (b.url as string).trim())));
+        }),
+      },
       "/api/seen": { POST: route(() => json({ marked: markSeen(store, [], now()) })) },
       "/api/poll": {
         POST: route(() => {
@@ -211,7 +265,7 @@ export async function startServer(opts: ServerOptions) {
         }),
       },
       "/api/status": {
-        GET: route(() => json({ instances: instanceStatus(store, config), polling: polling !== null, lastPoll })),
+        GET: route(async () => json({ instances: instanceStatus(store, config), polling: polling !== null, lastPoll, problems: await ctx.problems() })),
       },
       "/api/*": route(() => {
         throw new HttpError(404, "no such API endpoint");
