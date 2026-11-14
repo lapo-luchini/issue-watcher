@@ -31,7 +31,11 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     body: write ? JSON.stringify(body ?? {}) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ServerError(data.error ?? `HTTP ${res.status}`);
+  if (!res.ok) {
+    // Only the watcher's own JSON error proves the server is there; a proxy's 502 page does not.
+    if (typeof data.error === "string") throw new ServerError(data.error);
+    throw new Error(`HTTP ${res.status}`);
+  }
   return data as T;
 }
 
