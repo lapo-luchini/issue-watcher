@@ -7,7 +7,7 @@ import {
 } from "./core/api.ts";
 import type { InstanceConfig } from "./core/config.ts";
 import { openContext } from "./core/context.ts";
-import { acknowledge, defineSubscription, subscriptionUpdates, trackItem, untrackItem } from "./core/following.ts";
+import { acknowledge, defineSubscription, subscriptionStatus, subscriptionUpdates, trackItem, untrackItem } from "./core/following.ts";
 import type { Intent, IntentChange } from "./core/intent.ts";
 import type { Adapter } from "./core/model.ts";
 import { runAfterPoll } from "./core/hook.ts";
@@ -225,6 +225,13 @@ export async function startServer(opts: ServerOptions) {
       "/api/registers": { GET: route(() => json({ registers: ctx.registers() })) },
       "/api/subscriptions": {
         GET: route(async () => json({ subscriptions: [...(await following(() => ctx.subscriptions())).values()] })),
+      },
+      // Read-only: where each subscription stands (the web page's view); acknowledging stays the CLI's and MCP's.
+      "/api/subscription-status": {
+        GET: route(async () => {
+          const subs = [...(await following(() => ctx.subscriptions())).values()];
+          return json({ subscriptions: await following(() => Promise.all(subs.map((s) => subscriptionStatus(ctx, s)))) });
+        }),
       },
       "/api/subscriptions/:name": {
         PUT: route(async (req) => {

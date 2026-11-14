@@ -1,6 +1,6 @@
 // The HTTP API against a temporary watcher home (a git repo) and a fake forge.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTmp, tmpDir } from "./tmp.ts";
 import type { Adapter, ItemRef, Snapshot } from "../src/core/model.ts";
@@ -310,4 +310,87 @@ test("a poll started from the web runs the after_poll hook once", async () => {
   expect((await send("POST", "/api/poll", {})).status).toBe(202);
   await srv.idle();
   expect(readFileSync(ran, "utf8")).toBe("x\n");
+});
+
+// The subscription view of the web page: where each subscription stands, never changing it.
+const news = (itemUrl: string, key: string) => {
+  const store = new Store(join(home, "var/cache.sqlite"));
+  store.insertEvent({
+    itemUrl, key, kind: "comment", actor: "maint", actorRole: "maintainer", at: "2026-11-04T11:00:00.000Z",
+    detectedAt: "2026-11-04T11:01:00.000Z", excerpt: "ping", details: null, isSignal: true, reason: "signal:comment", isBaseline: false,
+  });
+  store.close();
+};
+const cursorOf = (name: string) => {
+  const store = new Store(join(home, "var/cache.sqlite"));
+  const c = store.subscriptionCursor(name);
+  store.close();
+  return c;
+};
+const standing = async () => (await (await api("/api/subscription-status")).json()).subscriptions;
+
+test("GET /api/subscription-status is empty without subscriptions", async () => {
+  expect(await (await api("/api/subscription-status")).json()).toEqual({ subscriptions: [] });
+});
+
+test("GET /api/subscription-status: scope, cursor, newest number and the unseen updates per item", async () => {
+  await send("PUT", "/api/subscriptions/proj", { all: true }); // cursor at 2: the two events of the fixture
+  news(PR, "c:10");
+  news(PR, "c:11");
+  expect(await standing()).toEqual([
+    {
+      name: "proj", register: "default", scope: "all", exclude: [], cursor: 2, latest: 4, error: null,
+      unseen: 2, items: [{ url: PR, id: itemId(PR), title: "Fix build", count: 2 }],
+    },
+  ]);
+});
+
+test("reading the status never moves the cursor, nor starts one", async () => {
+  await send("PUT", "/api/subscriptions/proj", { all: true });
+  news(PR, "c:10");
+  await standing();
+  await standing();
+  expect(cursorOf("proj")).toBe(2);
+  writeFileSync(join(home, "data/subscriptions.yaml"), "subscriptions:\n  - name: proj\n    register: default\n    scope: all\n  - name: fresh\n    register: default\n    scope: all\n");
+  const [, fresh] = await standing();
+  expect(fresh).toMatchObject({ name: "fresh", cursor: null, unseen: 0, items: [] });
+  expect(cursorOf("fresh")).toBeNull();
+});
+
+test("an acknowledgement empties the unseen count, and the number reported is the cursor", async () => {
+  await send("PUT", "/api/subscriptions/proj", { all: true });
+  news(PR, "c:10");
+  const r = await (await api("/api/subscriptions/proj/updates")).json();
+  await send("POST", "/api/subscriptions/proj/ack", { token: r.token });
+  expect(await standing()).toMatchObject([{ cursor: 3, latest: 3, unseen: 0, items: [] }]);
+});
+
+test("the status follows the scope: only followed items count, exclusions and muted entries do not", async () => {
+  await send("PUT", "/api/subscriptions/mine", { all: false });
+  await send("POST", "/api/subscriptions/mine/track", { url: PR });
+  await send("PUT", "/api/subscriptions/rest", { all: true });
+  await send("POST", "/api/subscriptions/rest/untrack", { url: PR }); // all: an exclusion
+  news(PR, "c:10");
+  const [mine, rest] = await standing();
+  expect(mine).toMatchObject({ name: "mine", scope: [PR], unseen: 1 });
+  expect(rest).toMatchObject({ name: "rest", scope: "all", exclude: [PR], unseen: 0, items: [] });
+  await send("PATCH", `/api/items/${itemId(PR)}`, { muted: true });
+  expect((await standing())[0]).toMatchObject({ unseen: 0 });
+});
+
+test("a subscription on a register that is gone says so and does not fail the others", async () => {
+  addRegister("items:\n");
+  await send("PUT", "/api/subscriptions/gone", { register: "houston" });
+  await send("PUT", "/api/subscriptions/proj", { all: true });
+  rmSync(houston());
+  const [gone, proj] = await standing();
+  expect(gone).toMatchObject({ name: "gone", register: "houston", error: "no such register: houston", unseen: 0, items: [] });
+  expect(proj).toMatchObject({ name: "proj", error: null });
+});
+
+test("a subscriptions.yaml that does not parse is a 400 with its text on the status endpoint", async () => {
+  writeFileSync(join(home, "data/subscriptions.yaml"), "subscriptions:\n  - name: p\n    scope: some\n");
+  const res = await api("/api/subscription-status");
+  expect(res.status).toBe(400);
+  expect((await res.json()).error).toContain("subscriptions.yaml");
 });

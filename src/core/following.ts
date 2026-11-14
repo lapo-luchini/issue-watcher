@@ -35,9 +35,14 @@ const tokenOf = (name: string, seq: number) => `${name}.${seq}`;
  */
 export async function subscriptionUpdates(ctx: Context, name: string): Promise<SubscriptionUpdates> {
   const sub = await need(ctx, name);
+  const cursor = ctx.store.startCursor(sub.name);
+  const upTo = ctx.store.maxSeq(); // before the events are read: a number stored meanwhile is above it
+  return { subscription: sub.name, token: tokenOf(sub.name, upTo), items: await newsOf(ctx, sub, cursor, upTo) };
+}
+
+/** The subscription's news numbered after `cursor` up to `upTo`, grouped by item (see subscriptionUpdates). */
+async function newsOf(ctx: Context, sub: Subscription, cursor: number, upTo: number): Promise<ItemUpdates[]> {
   const { store } = ctx;
-  const cursor = store.startCursor(sub.name);
-  const upTo = store.maxSeq(); // before the events are read: a number stored meanwhile is above it
   const items = new Map(listItems(store, await ctx.intent(sub.register), { register: sub.register }).map((v) => [v.url, v]));
   const inScope = sub.scope === "all" ? () => true : ((urls) => (url: string) => urls.has(url))(new Set(sub.scope));
   const excluded = new Set(sub.exclude);
@@ -50,7 +55,45 @@ export async function subscriptionUpdates(ctx: Context, name: string): Promise<S
     if (!group) groups.set(item.url, (group = { item, events: [] }));
     group.events.push(eventView(e));
   }
-  return { subscription: sub.name, token: tokenOf(sub.name, upTo), items: [...groups.values()] };
+  return [...groups.values()];
+}
+
+/** Where one subscription stands, for the web page: what it follows, its cursor and what it has not acknowledged. */
+export interface SubscriptionStatus {
+  name: string;
+  register: string;
+  scope: "all" | string[];
+  exclude: string[];
+  /** The number it has read up to; null while it has no cursor (the first read starts one). */
+  cursor: number | null;
+  /** The newest number given so far, to read the cursor against. */
+  latest: number;
+  /** Not acknowledged: updates, and the items they are on. */
+  unseen: number;
+  items: { url: string; id: string; title: string; count: number }[];
+  /** Why the news could not be worked out (its register is gone or unreadable); null when it could. */
+  error: string | null;
+}
+
+/**
+ * The same news as subscriptionUpdates, counted, and nothing written: a subscription without a
+ * cursor stays without one (it has nothing unseen), so looking never changes what a reader is given.
+ */
+export async function subscriptionStatus(ctx: Context, sub: Subscription): Promise<SubscriptionStatus> {
+  const cursor = ctx.store.subscriptionCursor(sub.name);
+  const latest = ctx.store.maxSeq();
+  const status: SubscriptionStatus = { name: sub.name, register: sub.register, scope: sub.scope, exclude: sub.exclude, cursor, latest, unseen: 0, items: [], error: null };
+  if (cursor === null) return status;
+  try {
+    for (const { item, events } of await newsOf(ctx, sub, cursor, latest)) {
+      status.unseen += events.length;
+      status.items.push({ url: item.url, id: item.id, title: item.title, count: events.length });
+    }
+  } catch (err) {
+    if (!(err instanceof RegisterError)) throw err;
+    status.error = err.message;
+  }
+  return status;
 }
 
 /** Moves the cursor to the token's point (forward only) and returns where it is. A token of another subscription or not given by a read is refused. */
