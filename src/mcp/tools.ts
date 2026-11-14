@@ -13,7 +13,6 @@ import type { Adapter } from "../core/model.ts";
 import { runAfterPoll } from "../core/hook.ts";
 import { pollAll, type InstanceResult } from "../core/poller.ts";
 import { checkRegisterName, DEFAULT_REGISTER, RegisterError, registerLabel } from "../core/registers.ts";
-import { SubscriptionError } from "../core/subscriptions.ts";
 import { INVALID_PARAMS, RpcError, ToolError, type ToolDef, type ToolSet } from "./protocol.ts";
 
 export interface ToolsOptions {
